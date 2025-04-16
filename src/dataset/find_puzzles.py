@@ -6,15 +6,15 @@ from logging import Logger
 from chess import Board, WHITE, BLACK, Move, pgn
 from chess.engine import UciProtocol, InfoDict
 
-from util.config import (
+from src.util.config import (
     FIND_PUZZLES_LOG_PATH, PUZZLE_ANALYSIS_ENGINE, CPU_COUNT, DATA_DIRECTORY, ANALYSIS_DEPTH, EVAL_THRESHOLD,
     MIN_MATERIAL_GAIN, MIN_WHITE_BETTER_THAN_NEXT_MOVE, MIN_PUZZLE_LENGTH_PLY,
     MAX_PUZZLE_LENGTH_PLY, ENGINE_PATHS
 )
-from util.chess_util import (
+from src.util.chess_util import (
     get_material, get_top_lines
 )
-from util.logger import get_logger
+from src.util.logger import get_logger
 
 engine_pool: asyncio.Queue = None
 
@@ -272,8 +272,6 @@ async def process_file(file_path: str, logger: Logger) -> None:
 
                 logger.info(
                     f"Saved {len(puzzles)} puzzles to {puzzle_pgn_path}")
-            else:
-                logger.info(f"No puzzles found in {file_path}")
         except Exception as e:
             logger.error(f"Error saving puzzles from {file_path}: {str(e)}")
 
