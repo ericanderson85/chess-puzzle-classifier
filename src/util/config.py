@@ -3,8 +3,7 @@ import os
 # Directories and files paths
 ENGINES_DIRECTORY = "engines/"
 DATA_DIRECTORY = "data/"
-OPENING_BOOK_PATH = os.path.join(
-    DATA_DIRECTORY, "polyglot-collection/codekiddy.bin")
+OPENING_BOOK_PATH = os.path.join(DATA_DIRECTORY, "codekiddy.bin")
 ENGINE_PATHS = {
     "stockfish": os.path.join(ENGINES_DIRECTORY, "stockfish"),
     "lc0": os.path.join(ENGINES_DIRECTORY, "lc0"),
@@ -14,9 +13,11 @@ ENGINE_PATHS = {
 # Game simulation parameters
 SIMULATE_GAMES_LOG_PATH = "logs/simulate_games.log"
 CURRENT_ENGINES = ("stockfish", "stockfish")  # (white, black)
-GAME_COUNTS = {"train": 600, "validate": 200, "test": 200}
+GAME_COUNTS = {"train": 60, "validate": 20, "test": 20}
+USE_GAME_TIME = False
 GAME_TIME_SECONDS = 2
 INCREMENT_SECONDS = 0
+MOVE_DEPTH = 7
 
 # Puzzle analysis parameters
 FIND_PUZZLES_LOG_PATH = "logs/find_puzzles.log"

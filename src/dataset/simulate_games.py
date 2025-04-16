@@ -10,7 +10,7 @@ from chess import engine, pgn, polyglot, Board, WHITE
 from src.util.chess_util import get_book_move
 from src.util.config import (
     CURRENT_ENGINES, GAME_COUNTS, GAME_TIME_SECONDS, INCREMENT_SECONDS,
-    ENGINE_PATHS, DATA_DIRECTORY, OPENING_BOOK_PATH, CPU_COUNT, SIMULATE_GAMES_LOG_PATH
+    ENGINE_PATHS, DATA_DIRECTORY, MOVE_DEPTH, OPENING_BOOK_PATH, CPU_COUNT, SIMULATE_GAMES_LOG_PATH, USE_GAME_TIME
 )
 from src.util.logger import get_logger
 
@@ -123,12 +123,17 @@ async def make_engine_move(
     turn = board.turn
     engine_index = 0 if (turn == WHITE) == (not switch_order) else 1
 
-    search_limit = engine.Limit(
-        white_clock=clocks[0] if turn == WHITE else clocks[1],
-        white_inc=INCREMENT_SECONDS,
-        black_clock=clocks[1] if turn == WHITE else clocks[0],
-        black_inc=INCREMENT_SECONDS,
-    )
+    if USE_GAME_TIME:
+        search_limit = engine.Limit(
+            white_clock=clocks[0] if turn == WHITE else clocks[1],
+            white_inc=INCREMENT_SECONDS,
+            black_clock=clocks[1] if turn == WHITE else clocks[0],
+            black_inc=INCREMENT_SECONDS,
+        )
+    else:
+        search_limit = engine.Limit(
+            depth=MOVE_DEPTH
+        )
 
     try:
         result = await engines[engine_index].play(
@@ -137,11 +142,13 @@ async def make_engine_move(
             info=engine.INFO_ALL
         )
 
-        clock_index = 0 if turn == WHITE else 1
-        time_used = result.info.get("time", 0)
-        clocks[clock_index] -= time_used
-        clocks[clock_index] += INCREMENT_SECONDS
-        clocks[clock_index] = max(clocks[clock_index], 0.1)
+        if USE_GAME_TIME:
+            clock_index = 0 if turn == WHITE else 1
+            time_used = result.info.get("time", 0)
+            clocks[clock_index] -= time_used
+            clocks[clock_index] += INCREMENT_SECONDS
+            clocks[clock_index] = max(clocks[clock_index], 0.1)
+
         board.push(result.move)
         return board, clocks, True
     except asyncio.TimeoutError:
