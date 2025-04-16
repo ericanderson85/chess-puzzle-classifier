@@ -235,11 +235,18 @@ async def main(logger: Logger) -> None:
         start_time = time.time()
         total_games = sum(GAME_COUNTS.values())
 
-        logger.info(
-            f"Starting simulation of {total_games} games between "
-            f"{CURRENT_ENGINES[0]} and {CURRENT_ENGINES[1]} "
-            f"({GAME_TIME_SECONDS}s + {INCREMENT_SECONDS}s increment)"
-        )
+        if USE_GAME_TIME:
+            logger.info(
+                f"Starting simulation of {total_games} games between "
+                f"{CURRENT_ENGINES[0]} and {CURRENT_ENGINES[1]} "
+                f"({GAME_TIME_SECONDS}s + {INCREMENT_SECONDS}s increment)"
+            )
+        else:
+            logger.info(
+                f"Starting simulation of {total_games} games between "
+                f"{CURRENT_ENGINES[0]} and {CURRENT_ENGINES[1]} "
+                f"({MOVE_DEPTH} depth)"
+            )
 
         for phase in ["train", "validate", "test"]:
             if GAME_COUNTS[phase] == 0:
