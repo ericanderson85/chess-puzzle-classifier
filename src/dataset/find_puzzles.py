@@ -4,7 +4,7 @@ import subprocess
 import asyncio
 from logging import Logger
 from chess import Board, WHITE, BLACK, Move, pgn
-from chess.engine import UciProtocol, InfoDict
+from chess.engine import UciProtocol, InfoDict, popen_uci
 
 from src.util.config import (
     FIND_PUZZLES_LOG_PATH, PUZZLE_ANALYSIS_ENGINE, CPU_COUNT, DATA_DIRECTORY, ANALYSIS_DEPTH, EVAL_THRESHOLD,
@@ -80,7 +80,7 @@ async def get_puzzle_solution(
     num_lines = 2 if board.turn == WHITE else 1
 
     try:
-        info = await get_top_lines(engine, board, num_lines=num_lines)
+        info = await get_top_lines(engine, board, num_lines)
 
         if len(info) < num_lines:
             return None
@@ -108,7 +108,6 @@ async def find_puzzles(engine: UciProtocol, game: pgn.Game, logger: Logger) -> l
     board = game.board()
     puzzles = []
     move_count = sum(1 for _ in game.mainline_moves())
-    logger.info(f"Analyzing game with {move_count} moves")
 
     skip_next_move = False
 
@@ -157,8 +156,6 @@ async def find_puzzles(engine: UciProtocol, game: pgn.Game, logger: Logger) -> l
                 continue
 
             puzzles.append((fen, solution))
-            logger.info(
-                f"Found puzzle at move {move_number+1} with {len(solution)} moves")
         except Exception as e:
             logger.warning(f"Error processing move {move_number+1}: {str(e)}")
             continue
@@ -172,7 +169,7 @@ async def init_engine_pool(pool_size: int, logger: Logger) -> None:
         engine_pool = asyncio.Queue(maxsize=pool_size)
         for i in range(pool_size):
             try:
-                _, engine = await engine.popen_uci(
+                _, engine = await popen_uci(
                     ENGINE_PATHS[PUZZLE_ANALYSIS_ENGINE], stderr=subprocess.DEVNULL
                 )
                 await engine_pool.put(engine)
@@ -211,8 +208,6 @@ async def close_engine_pool(logger: Logger) -> None:
 
 
 async def process_file(file_path: str, logger: Logger) -> None:
-    logger.info(f"Processing file: {file_path}")
-
     if engine_pool is None:
         logger.error("Engine pool is not initialized")
         return
@@ -220,6 +215,8 @@ async def process_file(file_path: str, logger: Logger) -> None:
     engine = None
     try:
         engine = await engine_pool.get()
+
+        logger.info(f"Processing file: {file_path}")
 
         try:
             with open(file_path) as pgn_file:
@@ -286,28 +283,31 @@ async def process_file(file_path: str, logger: Logger) -> None:
                 logger.error(f"Error returning engine to pool: {str(e)}")
 
 
-async def main() -> None:
-    await init_engine_pool(CPU_COUNT)
-
-    for phase in ["train", "validate", "test"]:
-        print(f"Finding {phase} puzzles ...")
-        tasks = []
-        for game_id in sorted(
-            os.listdir(os.path.join(DATA_DIRECTORY, phase)), key=lambda g: int(g)
-        ):
-            game_path = os.path.join(
-                DATA_DIRECTORY, phase, game_id, f"{game_id}.pgn")
-            if not os.path.exists(game_path):
-                print(f"File {game_path} does not exist")
-                continue
-            tasks.append(asyncio.create_task(process_file(game_path)))
+async def main(logger: Logger) -> None:
+    await init_engine_pool(CPU_COUNT, logger)
 
     try:
+        tasks = []
+
+        for phase in ["train", "validate", "test"]:
+            logger.info(f"Finding {phase} puzzles ...")
+            for game_id in sorted(
+                os.listdir(os.path.join(DATA_DIRECTORY, phase)), key=lambda g: int(g)
+            ):
+                game_path = os.path.join(
+                    DATA_DIRECTORY, phase, game_id, f"{game_id}.pgn")
+                if not os.path.exists(game_path):
+                    logger.warning(f"File {game_path} does not exist")
+                    continue
+                tasks.append(process_file(game_path, logger))
+
         await asyncio.gather(*tasks)
+
     except Exception as e:
-        print("An error occurred during processing:", e)
+        logger.error("An error occurred during processing:", e)
+
     finally:
-        await close_engine_pool()
+        await close_engine_pool(logger)
 
 if __name__ == "__main__":
     logger = get_logger(__name__, FIND_PUZZLES_LOG_PATH)
