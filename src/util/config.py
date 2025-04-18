@@ -3,6 +3,8 @@ import os
 # Directories and files paths
 ENGINES_DIRECTORY = "engines/"
 DATA_DIRECTORY = "data/"
+GAMES_DIRECTORY = os.path.join(DATA_DIRECTORY, 'games')
+PUZZLES_DIRECTORY = os.path.join(DATA_DIRECTORY, 'puzzles')
 OPENING_BOOK_PATH = os.path.join(DATA_DIRECTORY, "codekiddy.bin")
 ENGINE_PATHS = {
     "stockfish": os.path.join(ENGINES_DIRECTORY, "stockfish"),
@@ -13,7 +15,8 @@ ENGINE_PATHS = {
 # Game simulation parameters
 SIMULATE_GAMES_LOG_PATH = "logs/simulate_games.log"
 CURRENT_ENGINES = ("stockfish", "stockfish")  # (white, black)
-GAME_COUNTS = {"train": 60, "validate": 20, "test": 20}
+# GAME_COUNT = 65536
+GAME_COUNT = 10
 USE_GAME_TIME = False
 GAME_TIME_SECONDS = 2
 INCREMENT_SECONDS = 0

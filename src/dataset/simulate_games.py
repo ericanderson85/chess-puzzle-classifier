@@ -1,15 +1,15 @@
 import os
 import sys
 import subprocess
-import shutil
 import asyncio
+import random
 from logging import Logger
 import time
 from chess import engine, pgn, polyglot, Board, WHITE
 
 from src.util.chess_util import get_book_move
 from src.util.config import (
-    CURRENT_ENGINES, GAME_COUNTS, GAME_TIME_SECONDS, INCREMENT_SECONDS,
+    CURRENT_ENGINES, GAME_COUNT, GAME_TIME_SECONDS, GAMES_DIRECTORY, INCREMENT_SECONDS,
     ENGINE_PATHS, DATA_DIRECTORY, MOVE_DEPTH, OPENING_BOOK_PATH, CPU_COUNT, SIMULATE_GAMES_LOG_PATH, USE_GAME_TIME
 )
 from src.util.logger import get_logger
@@ -25,17 +25,15 @@ def with_semaphore(func):
     return wrapper
 
 
-def save_game(board: Board, engine_names: tuple[str, str], phase: str, game_id: int, logger: Logger) -> int:
+def save_game(board: Board, engine_names: tuple[str, str], game_id: int, logger: Logger) -> int:
     try:
-        game_directory = os.path.join(DATA_DIRECTORY, phase, str(game_id))
-        os.makedirs(game_directory, exist_ok=True)
-        pgn_path = os.path.join(game_directory, f"{game_id}.pgn")
+        pgn_path = os.path.join(GAMES_DIRECTORY, f"{game_id}.pgn")
 
         game = pgn.Game.from_board(board)
         game.headers["White"] = engine_names[0]
         game.headers["Black"] = engine_names[1]
         game.headers["Date"] = time.strftime("%Y.%m.%d")
-        game.headers["Event"] = f"Engine match - {phase}"
+        game.headers["Event"] = f"Engine match"
         game.headers["Round"] = str(game_id)
 
         result = board.result(claim_draw=True)
@@ -136,20 +134,25 @@ async def make_engine_move(
         )
 
     try:
-        result = await engines[engine_index].play(
-            board=board,
-            limit=search_limit,
-            info=engine.INFO_ALL
-        )
+        move = None
+        if random.random() < 0.15:
+            move = random.choice(list(board.generate_legal_moves()))
+        else:
+            result = await engines[engine_index].play(
+                board=board,
+                limit=search_limit,
+                info=engine.INFO_ALL
+            )
+            move = result.move
 
-        if USE_GAME_TIME:
-            clock_index = 0 if turn == WHITE else 1
-            time_used = result.info.get("time", 0)
-            clocks[clock_index] -= time_used
-            clocks[clock_index] += INCREMENT_SECONDS
-            clocks[clock_index] = max(clocks[clock_index], 0.1)
+            if USE_GAME_TIME:
+                clock_index = 0 if turn == WHITE else 1
+                time_used = result.info.get("time", 0)
+                clocks[clock_index] -= time_used
+                clocks[clock_index] += INCREMENT_SECONDS
+                clocks[clock_index] = max(clocks[clock_index], 0.1)
 
-        board.push(result.move)
+        board.push(move)
         return board, clocks, True
     except asyncio.TimeoutError:
         logger.warning(
@@ -191,7 +194,7 @@ async def play_game(
 
 
 @with_semaphore
-async def simulate(phase: str, game_id: int, logger: Logger) -> int:
+async def simulate(game_id: int, logger: Logger) -> int:
     engine1 = None
     engine2 = None
     start_time = time.time()
@@ -210,7 +213,7 @@ async def simulate(phase: str, game_id: int, logger: Logger) -> int:
             logger
         )
 
-        game_id = save_game(board, engine_names, phase, game_id, logger)
+        game_id = save_game(board, engine_names, game_id, logger)
 
         duration = time.time() - start_time
         logger.info(
@@ -233,53 +236,48 @@ async def main(logger: Logger) -> None:
     try:
         game_id = 0
         start_time = time.time()
-        total_games = sum(GAME_COUNTS.values())
 
         if USE_GAME_TIME:
             logger.info(
-                f"Starting simulation of {total_games} games between "
+                f"Starting simulation of {GAME_COUNT} games between "
                 f"{CURRENT_ENGINES[0]} and {CURRENT_ENGINES[1]} "
                 f"({GAME_TIME_SECONDS}s + {INCREMENT_SECONDS}s increment)"
             )
         else:
             logger.info(
-                f"Starting simulation of {total_games} games between "
+                f"Starting simulation of {GAME_COUNT} games between "
                 f"{CURRENT_ENGINES[0]} and {CURRENT_ENGINES[1]} "
                 f"({MOVE_DEPTH} depth)"
             )
 
-        for phase in ["train", "validate", "test"]:
-            if GAME_COUNTS[phase] == 0:
-                continue
-
-            phase_directory = os.path.join(DATA_DIRECTORY, phase)
-            if os.path.exists(phase_directory):
-                logger.info(f"Removing existing {phase} directory")
-                shutil.rmtree(phase_directory)
-            os.makedirs(phase_directory, exist_ok=True)
-
+        if os.path.exists(GAMES_DIRECTORY):
             logger.info(
-                f"\nSimulating {GAME_COUNTS[phase]} {phase} games at "
-                f"{GAME_TIME_SECONDS}s + {INCREMENT_SECONDS}s increment "
-                f"between {CURRENT_ENGINES[0]} and {CURRENT_ENGINES[1]}"
-            )
+                f"Game directory already exists. Appending new games")
+            current_games = os.listdir(GAMES_DIRECTORY)
+            current_games = list(
+                map(lambda game_str: game_str.replace('.pgn', ''), current_games))
+            current_games = list(
+                filter(lambda game: game.isnumeric(), current_games))
+            current_games = list(
+                map(lambda game_str: int(game_str), current_games))
+            game_id = max(current_games) + 1
+            logger.info(f"New games start at id {game_id}")
+        else:
+            os.makedirs(GAMES_DIRECTORY)
 
-            tasks = []
-            for _ in range(GAME_COUNTS[phase]):
-                tasks.append(simulate(phase, game_id, logger))
-                game_id += 1
+        tasks = []
+        for _ in range(GAME_COUNT):
+            tasks.append(simulate(game_id, logger))
+            game_id += 1
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            failures = [result for result in results if isinstance(
-                result, Exception) or (isinstance(result, int) and result < 0)]
-            if failures:
-                logger.warning(f"Phase {phase}: {len(failures)} games failed")
-                for failure in failures:
-                    print(failure)
-
-            logger.info(
-                f"Phase {phase} completed: {GAME_COUNTS[phase] - len(failures)} successful games")
+        failures = [result for result in results if isinstance(
+            result, Exception) or (isinstance(result, int) and result < 0)]
+        if failures:
+            logger.warning(f"{len(failures)} games failed")
+            for failure in failures:
+                print(failure)
 
         total_time = time.time() - start_time
         logger.info(f"Simulation completed in {total_time:.1f} seconds")

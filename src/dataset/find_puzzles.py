@@ -107,7 +107,6 @@ async def get_puzzle_solution(
 async def find_puzzles(engine: UciProtocol, game: pgn.Game, logger: Logger) -> list[tuple[str, list[Move]]]:
     board = game.board()
     puzzles = []
-    move_count = sum(1 for _ in game.mainline_moves())
 
     skip_next_move = False
 
