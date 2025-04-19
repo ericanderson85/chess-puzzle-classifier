@@ -137,14 +137,16 @@ async def get_puzzle_solution(
         board.push(best_move)
 
         if is_valid_puzzle(board, starting_material, ply):
-            return moves
+            solution = moves.copy()
+            return await get_puzzle_solution(engine, board, starting_material, ply + 1, moves, logger) or solution
 
         return await get_puzzle_solution(
             engine, board, starting_material, ply + 1, moves, logger
         )
 
     except Exception as e:
-        logger.warning(f"Error in analysis: {str(e)}")
+        logger.warning(
+            f"Error in analysis: {type(e).__name__}: {str(e) or 'No message'} (FEN: {board.fen()})")
         return None
 
 

@@ -16,8 +16,7 @@ ENGINE_PATHS = {
 # Game simulation parameters
 SIMULATE_GAMES_LOG_PATH = "logs/simulate_games.log"
 CURRENT_ENGINES = ("stockfish", "stockfish")  # (white, black)
-# GAME_COUNT = 65536
-GAME_COUNT = 100
+GAME_COUNT = 65536
 USE_GAME_TIME = False
 GAME_TIME_SECONDS = 2
 INCREMENT_SECONDS = 0
@@ -26,12 +25,12 @@ MOVE_DEPTH = 5
 # Puzzle analysis parameters
 FIND_PUZZLES_LOG_PATH = "logs/find_puzzles.log"
 PUZZLE_ANALYSIS_ENGINE = "stockfish"
-ANALYSIS_DEPTH = 18
+ANALYSIS_DEPTH = 16
 EVAL_THRESHOLD = 300
 MIN_MATERIAL_GAIN = 210
 MIN_WHITE_BETTER_THAN_NEXT_MOVE = 250
 MIN_PUZZLE_LENGTH_PLY = 3
-MAX_PUZZLE_LENGTH_PLY = 10
+MAX_PUZZLE_LENGTH_PLY = 16
 
 # Piece values for material evaluation
 PAWN_VALUE = 100
