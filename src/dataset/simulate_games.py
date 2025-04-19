@@ -10,7 +10,7 @@ from chess import engine, pgn, polyglot, Board, WHITE
 from src.util.chess_util import get_book_move
 from src.util.config import (
     CURRENT_ENGINES, GAME_COUNT, GAME_TIME_SECONDS, GAMES_DIRECTORY, INCREMENT_SECONDS,
-    ENGINE_PATHS, DATA_DIRECTORY, MOVE_DEPTH, OPENING_BOOK_PATH, CPU_COUNT, SIMULATE_GAMES_LOG_PATH, USE_GAME_TIME
+    ENGINE_PATHS, MOVE_DEPTH, OPENING_BOOK_PATH, CPU_COUNT, SIMULATE_GAMES_LOG_PATH, USE_GAME_TIME
 )
 from src.util.logger import get_logger
 

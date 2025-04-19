@@ -4,12 +4,13 @@ import subprocess
 import asyncio
 from logging import Logger
 from chess import Board, WHITE, BLACK, Move, pgn
+from chess import PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
 from chess.engine import UciProtocol, InfoDict, popen_uci
 
 from src.util.config import (
-    FIND_PUZZLES_LOG_PATH, PUZZLE_ANALYSIS_ENGINE, CPU_COUNT, DATA_DIRECTORY, ANALYSIS_DEPTH, EVAL_THRESHOLD,
+    FIND_PUZZLES_LOG_PATH, GAMES_DIRECTORY, PIECE_VALUES, PUZZLE_ANALYSIS_ENGINE, CPU_COUNT, EVAL_THRESHOLD,
     MIN_MATERIAL_GAIN, MIN_WHITE_BETTER_THAN_NEXT_MOVE, MIN_PUZZLE_LENGTH_PLY,
-    MAX_PUZZLE_LENGTH_PLY, ENGINE_PATHS
+    MAX_PUZZLE_LENGTH_PLY, ENGINE_PATHS, PUZZLES_DIRECTORY
 )
 from src.util.chess_util import (
     get_material, get_top_lines
@@ -19,158 +20,13 @@ from src.util.logger import get_logger
 engine_pool: asyncio.Queue = None
 
 
-def should_stop_searching(board: Board, ply: int) -> bool:
-    return board.is_game_over() or ply > MAX_PUZZLE_LENGTH_PLY
-
-
-def is_significant_move_diff(board: Board, info: list[InfoDict]) -> bool:
-    if board.turn == BLACK:
-        return True
-
-    if len(info) < 2:
-        return False
-
-    best = info[0]
-    second = info[1]
-    if best["score"].is_mate():
-        first_mate = best["score"].white().mate()
-        if first_mate < 0:
-            return False
-
-        second_mate = best["score"].white().mate()
-        if second_mate is not None and second_mate > 0:
-            return False
-
-        return True
-
-    if second["score"].is_mate():
-        return True
-
-    try:
-        best_score = best["score"].white().score()
-        second_score = second["score"].white().score()
-        return best_score - second_score >= MIN_WHITE_BETTER_THAN_NEXT_MOVE
-    except Exception:
-        return False
-
-
-def is_valid_puzzle(board: Board, starting_material: int, ply: int) -> bool:
-    if board.turn == BLACK:
-        return False
-    if ply < MIN_PUZZLE_LENGTH_PLY:
-        return False
-
-    if get_material(board) - starting_material < MIN_MATERIAL_GAIN:
-        return False
-
-    return True
-
-
-async def get_puzzle_solution(
-    engine: UciProtocol,
-    board: Board,
-    starting_material: int,
-    ply: int,
-    moves: list[Move],
-    logger: Logger
-) -> list[Move] | None:
-    if should_stop_searching(board, ply):
-        return None
-
-    num_lines = 2 if board.turn == WHITE else 1
-
-    try:
-        info = await get_top_lines(engine, board, num_lines)
-
-        if len(info) < num_lines:
-            return None
-
-        if not is_significant_move_diff(board, info):
-            return None
-
-        best_move = info[0]["pv"][0]
-        moves.append(best_move)
-        board.push(best_move)
-
-        if is_valid_puzzle(board, starting_material, ply):
-            return moves
-
-        return await get_puzzle_solution(
-            engine, board, starting_material, ply + 1, moves, logger
-        )
-
-    except Exception as e:
-        logger.warning(f"Error in analysis: {str(e)}")
-        return None
-
-
-async def find_puzzles(engine: UciProtocol, game: pgn.Game, logger: Logger) -> list[tuple[str, list[Move]]]:
-    board = game.board()
-    puzzles = []
-
-    skip_next_move = False
-
-    for move_number, move in enumerate(game.mainline_moves()):
-        try:
-            skip = skip_next_move or move_number < 8
-            skip_next_move = board.is_capture(move) or board.gives_check(move)
-            board.push(move)
-
-            if skip:
-                continue
-
-            white_perspective = (
-                board.copy() if board.turn == WHITE else board.mirror()
-            )
-
-            fen = white_perspective.fen()
-
-            info = await get_top_lines(engine, white_perspective, multipv=1)
-            if not info:
-                logger.debug(f"No analysis at move {move_number+1}")
-                continue
-
-            best_move = info[0]
-            if best_move["score"].is_mate():
-                logger.debug(
-                    f"Skipping mate position at move {move_number+1}")
-                continue
-
-            if best_move["score"].white().score() < EVAL_THRESHOLD:
-                logger.debug(
-                    f"Position at move {move_number+1} below threshold")
-                continue
-
-            logger.debug(f"Looking for puzzle at move {move_number+1}")
-            solution = await get_puzzle_solution(
-                engine,
-                white_perspective,
-                get_material(white_perspective),
-                0,
-                [],
-                logger
-            )
-
-            if solution is None:
-                continue
-
-            puzzles.append((fen, solution))
-        except Exception as e:
-            logger.warning(f"Error processing move {move_number+1}: {str(e)}")
-            continue
-
-    return puzzles
-
-
 async def init_engine_pool(pool_size: int, logger: Logger) -> None:
     global engine_pool
     try:
         engine_pool = asyncio.Queue(maxsize=pool_size)
         for i in range(pool_size):
             try:
-                _, engine = await popen_uci(
-                    ENGINE_PATHS[PUZZLE_ANALYSIS_ENGINE], stderr=subprocess.DEVNULL
-                )
+                _, engine = await popen_uci(ENGINE_PATHS[PUZZLE_ANALYSIS_ENGINE], stderr=subprocess.DEVNULL)
                 await engine_pool.put(engine)
                 logger.debug(f"Initialized engine {i+1}/{pool_size}")
             except Exception as e:
@@ -206,6 +62,128 @@ async def close_engine_pool(logger: Logger) -> None:
             f"Error during engine pool shutdown: {str(e)}", exc_info=True)
 
 
+def should_stop_searching(board: Board, ply: int) -> bool:
+    return board.is_game_over() or ply > MAX_PUZZLE_LENGTH_PLY
+
+
+def is_significant_move_diff(board: Board, info: list[InfoDict]) -> bool:
+    if board.turn == BLACK:
+        return True
+
+    if len(info) < 2:
+        return False
+
+    best = info[0]["score"].white()
+    second = info[1]["score"].white()
+
+    if best.is_mate():
+        return False
+
+    if second.is_mate():
+        return second.mate() < 0
+
+    return best.score() - second.score() >= MIN_WHITE_BETTER_THAN_NEXT_MOVE
+
+
+def is_valid_puzzle(board: Board, starting_material: int, ply: int) -> bool:
+    if board.turn == BLACK:
+        return False
+    if ply < MIN_PUZZLE_LENGTH_PLY:
+        return False
+
+    if get_material(board) - starting_material < MIN_MATERIAL_GAIN:
+        return False
+
+    return True
+
+
+async def get_puzzle_solution(
+    engine: UciProtocol,
+    board: Board,
+    starting_material: int,
+    ply: int,
+    moves: list[Move],
+    logger: Logger
+) -> list[Move] | None:
+    if should_stop_searching(board, ply):
+        return None
+
+    num_lines = 2 if board.turn == WHITE else 1
+
+    try:
+        info = await get_top_lines(engine, board, num_lines)
+
+        if len(info) < num_lines:
+            return None
+
+        best_move = info[0]["pv"][0]
+        best_move_score = info[0]["score"].white()
+        if best_move_score.is_mate() or best_move_score.score() < EVAL_THRESHOLD:
+            return None
+
+        if ply == 0:
+            if board.is_capture(best_move):
+                piece_moved = board.piece_type_at(best_move.from_square)
+                piece_taken = board.piece_type_at(best_move.to_square)
+                if PIECE_VALUES[piece_taken] > PIECE_VALUES[piece_moved]:
+                    return None
+            if best_move.promotion is not None and best_move.promotion == QUEEN:
+                return None
+
+        if not is_significant_move_diff(board, info):
+            return None
+
+        moves.append(best_move)
+        board.push(best_move)
+
+        if is_valid_puzzle(board, starting_material, ply):
+            return moves
+
+        return await get_puzzle_solution(
+            engine, board, starting_material, ply + 1, moves, logger
+        )
+
+    except Exception as e:
+        logger.warning(f"Error in analysis: {str(e)}")
+        return None
+
+
+async def find_puzzle(engine: UciProtocol, game: pgn.Game, logger: Logger) -> tuple[str, list[Move]] | None:
+    board = game.board()
+
+    try:
+        for move_number, move in enumerate(game.mainline_moves()):
+            was_capture = board.is_capture(move)
+            gave_check = board.gives_check(move)
+
+            board.push(move)
+
+            if move_number < 8 or was_capture or gave_check:
+                continue
+
+            white_perspective = board.copy() if board.turn == WHITE else board.mirror()
+            fen = white_perspective.fen()
+
+            solution = await get_puzzle_solution(
+                engine,
+                white_perspective,
+                get_material(white_perspective),
+                0,
+                [],
+                logger
+            )
+
+            if solution is None:
+                continue
+
+            return fen, solution
+
+    except Exception as e:
+        logger.warning(f"Error game at FEN: {board.fen()}: {str(e)}")
+
+    return None
+
+
 async def process_file(file_path: str, logger: Logger) -> None:
     if engine_pool is None:
         logger.error("Engine pool is not initialized")
@@ -231,45 +209,43 @@ async def process_file(file_path: str, logger: Logger) -> None:
             return
 
         try:
-            puzzles = await find_puzzles(engine, game, logger)
+            puzzle = await find_puzzle(engine, game, logger)
         except Exception as e:
             logger.error(
                 f"Error finding puzzles in {file_path}: {str(e)}", exc_info=True)
             return
 
-        try:
-            game_id = os.path.basename(file_path).replace(".pgn", "")
-            puzzle_pgn_path = os.path.join(
-                os.path.dirname(file_path), f"{game_id}_puzzles.pgn"
-            )
+        if puzzle is None:
+            return
 
-            if puzzles:
-                with open(puzzle_pgn_path, "w") as puzzle_pgn_file:
-                    for fen, solution in puzzles:
-                        pgn_game = pgn.Game()
+        game_id = os.path.basename(file_path).replace(".pgn", "")
+        puzzle_pgn_path = os.path.join(
+            PUZZLES_DIRECTORY, f"{game_id}.pgn"
+        )
 
-                        for header in ["White", "Black", "Date", "Event"]:
-                            if header in game.headers:
-                                pgn_game.headers[header] = game.headers[header]
+        with open(puzzle_pgn_path, "w") as puzzle_pgn_file:
+            fen, solution = puzzle
 
-                        pgn_game.headers["FEN"] = fen
-                        pgn_game.headers["Event"] = "Puzzle"
+            pgn_game = pgn.Game()
 
-                        node = pgn_game
-                        for move in solution:
-                            node = node.add_variation(move)
-                        pgn_game.headers["Result"] = "*"
+            for header in ["White", "Black", "Date", "Event"]:
+                if header in game.headers:
+                    pgn_game.headers[header] = game.headers[header]
 
-                        exporter = pgn.StringExporter(
-                            headers=True, variations=False, comments=False
-                        )
-                        game_str = pgn_game.accept(exporter)
-                        puzzle_pgn_file.write(game_str + "\n\n")
+            pgn_game.headers["FEN"] = fen
+            pgn_game.headers["Event"] = "Puzzle"
 
-                logger.info(
-                    f"Saved {len(puzzles)} puzzles to {puzzle_pgn_path}")
-        except Exception as e:
-            logger.error(f"Error saving puzzles from {file_path}: {str(e)}")
+            node = pgn_game
+            for move in solution:
+                node = node.add_variation(move)
+            pgn_game.headers["Result"] = "*"
+
+            exporter = pgn.StringExporter(
+                headers=True, variations=False, comments=False)
+            game_str = pgn_game.accept(exporter)
+            puzzle_pgn_file.write(game_str + "\n\n")
+
+            logger.info(f"Saved puzzle to {puzzle_pgn_path}")
 
     except Exception as e:
         logger.error(
@@ -286,24 +262,39 @@ async def main(logger: Logger) -> None:
     await init_engine_pool(CPU_COUNT, logger)
 
     try:
-        tasks = []
+        games_start = 0
+        games = os.listdir(GAMES_DIRECTORY)
+        game_ids = sorted([game_path.replace('.pgn', '')
+                          for game_path in games], key=lambda g: int(g))
 
-        for phase in ["train", "validate", "test"]:
-            logger.info(f"Finding {phase} puzzles ...")
-            for game_id in sorted(
-                os.listdir(os.path.join(DATA_DIRECTORY, phase)), key=lambda g: int(g)
-            ):
-                game_path = os.path.join(
-                    DATA_DIRECTORY, phase, game_id, f"{game_id}.pgn")
-                if not os.path.exists(game_path):
-                    logger.warning(f"File {game_path} does not exist")
-                    continue
-                tasks.append(process_file(game_path, logger))
+        if os.path.exists(PUZZLES_DIRECTORY):
+            puzzles = os.listdir(PUZZLES_DIRECTORY)
+            puzzle_game_ids = [
+                int(game_path.replace('.pgn', ''))
+                for game_path in puzzles
+                if game_path.replace('.pgn', '').isnumeric()
+            ]
+
+            if len(puzzle_game_ids) != 0:
+                games_start = max(puzzle_game_ids) + 1
+                logger.info(
+                    f"Puzzles already exist. Starting from game {games_start}")
+        else:
+            os.mkdir(PUZZLES_DIRECTORY)
+
+        logger.info(f"Finding puzzles in {len(games) - games_start} games...")
+        tasks = []
+        for game_id in game_ids[games_start:]:
+            game_path = os.path.join(GAMES_DIRECTORY, f"{game_id}.pgn")
+            if not os.path.exists(game_path):
+                logger.warning(f"File {game_path} does not exist")
+                continue
+            tasks.append(process_file(game_path, logger))
 
         await asyncio.gather(*tasks)
 
     except Exception as e:
-        logger.error("An error occurred during processing:", e)
+        logger.error(f"An error occurred during processing: {e}")
 
     finally:
         await close_engine_pool(logger)
