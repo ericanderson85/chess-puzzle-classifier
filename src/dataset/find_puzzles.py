@@ -82,7 +82,7 @@ def is_significant_move_diff(board: Board, info: list[InfoDict]) -> bool:
     if second.is_mate():
         return second.mate() < 0
 
-    return best.score() - second.score() >= MIN_WHITE_BETTER_THAN_NEXT_MOVE
+    return second.score() < EVAL_THRESHOLD and best.score() - second.score() >= MIN_WHITE_BETTER_THAN_NEXT_MOVE
 
 
 def is_valid_puzzle(board: Board, starting_material: int, ply: int) -> bool:
