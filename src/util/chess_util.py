@@ -1,6 +1,6 @@
 from logging import Logger
 import random
-from chess import Board, popcount, WHITE, BLACK, polyglot
+from chess import Board, popcount, WHITE, BLACK, polyglot, pgn
 from chess.engine import UciProtocol, InfoDict, Limit
 
 from src.util.config import (ANALYSIS_DEPTH, PAWN_VALUE, KNIGHT_VALUE,
@@ -55,4 +55,29 @@ async def get_book_move(board: Board, reader: polyglot.MemoryMappedReader, logge
             return random.choice(entries)
     except Exception as e:
         logger.warning(f"Error selecting book move: {str(e)}")
+        return None
+
+
+def get_game(puzzle_path: str, logger: Logger) -> pgn.Game | None:
+    try:
+        with open(puzzle_path, 'r') as pgn_file:
+            game = pgn.read_game(pgn_file)
+            if game is None:
+                logger.warning(f"Invalid or empty PGN file: {puzzle_path}")
+                return None
+            return game
+    except FileNotFoundError:
+        logger.error(f"File not found: {puzzle_path}")
+        return None
+    except Exception as e:
+        logger.error(f"Error reading PGN file {puzzle_path}: {str(e)}")
+        return None
+
+
+def write_game_to_file(game: pgn.Game, puzzle_path: str, logger: Logger) -> None:
+    try:
+        with open(puzzle_path, 'w') as file:
+            file.write(str(game))
+    except Exception as e:
+        logger.error(f"Error writing PGN file {puzzle_path}: {str(e)}")
         return None

@@ -32,6 +32,10 @@ MIN_WHITE_BETTER_THAN_NEXT_MOVE = 250
 MIN_PUZZLE_LENGTH_PLY = 3
 MAX_PUZZLE_LENGTH_PLY = 32
 
+# Puzzle classification parameters
+CLASSIFY_PUZZLES_LOG_PATH = "logs/classify_puzzles.log"
+
+
 # Piece values for material evaluation
 PAWN_VALUE = 100
 KNIGHT_VALUE = 300
