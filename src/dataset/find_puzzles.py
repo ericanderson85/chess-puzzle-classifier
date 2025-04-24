@@ -106,7 +106,7 @@ async def get_puzzle_solution(
             return None
 
         if ply == 0:
-            if board.is_capture(best_move):
+            if board.is_capture(best_move) and not board.is_en_passant(best_move):
                 piece_moved = board.piece_type_at(best_move.from_square)
                 piece_taken = board.piece_type_at(best_move.to_square)
 
