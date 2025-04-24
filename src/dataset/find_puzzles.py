@@ -87,25 +87,21 @@ async def get_puzzle_solution(
 ) -> list[Move] | None:
 
     if board.is_game_over():
-        # logger.info("Skipping puzzle: Game is over")
         return None
 
     try:
         if board.turn == WHITE:
             info = await get_top_lines(engine, board, 2)
             if info is None or len(info) < 2:
-                # logger.info("Skipping puzzle: not enough lines")
                 return None
 
             best_move = info[0]["pv"][0]
             best_move_score = info[0]["score"].white()
 
             if best_move_score.is_mate():
-                # logger.info("Skipping puzzle: mate")
                 return None
 
             if best_move_score.score() < EVALUATION_THRESHOLD:
-                # logger.info("Skipping puzzle: below eval threshold")
                 return None
 
             if ply == 0:
@@ -117,14 +113,11 @@ async def get_puzzle_solution(
                     is_undefended = len(board.attackers(BLACK, best_move.to_square)) == 0
 
                     if is_winning_capture:
-                        # logger.info("Skipping puzzle: first move is a winning capture")
                         return None
-                    if is_undefended:
-                        # logger.info("Skipping puzzle: first move is a capture of an undefended piece")
+                    if is_undefended and piece_taken != PAWN:
                         return None
 
                 if best_move.promotion is not None and best_move.promotion == QUEEN:
-                    # logger.info("Skipping puzzle: first move is a promotion to a queen")
                     return None
 
             if not is_significant_move_diff(info):
@@ -133,14 +126,12 @@ async def get_puzzle_solution(
         else:
             info = await get_top_lines(engine, board, 1)
             if info is None:
-                # logger.info("Skipping puzzle: not enough lines")
                 return None
 
             best_move = info[0]["pv"][0]
             best_move_score = info[0]["score"].black()
 
             if best_move_score.is_mate():
-                # logger.info("Skipping puzzle: mate")
                 return None
 
             if ply == PUZZLE_PLY:
@@ -148,7 +139,6 @@ async def get_puzzle_solution(
                 current_material = get_material(board)
                 won_material = current_material - starting_material >= MIN_MATERIAL_GAIN
                 if not won_material:
-                    # logger.info(f"Skipping puzzle: Didn't win enough material {current_material - starting_material}")
                     return None
 
                 return moves
