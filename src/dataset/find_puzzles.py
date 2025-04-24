@@ -131,6 +131,7 @@ async def get_puzzle_solution(
                 return None
 
             if ply == PUZZLE_PLY:
+                board.push(best_move)
                 current_material = get_material(board)
                 won_material = current_material - starting_material >= MIN_MATERIAL_GAIN
                 if not won_material:
