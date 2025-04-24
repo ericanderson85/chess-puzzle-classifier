@@ -130,16 +130,6 @@ async def get_puzzle_solution(
             if not is_significant_move_diff(info):
                 return None
 
-            if ply == PUZZLE_PLY:
-                board.push(best_move)
-                current_material = get_material(board)
-                won_material = current_material - starting_material >= MIN_MATERIAL_GAIN
-                if not won_material:
-                    # logger.info(f"Skipping puzzle: Didn't win enough material {current_material - starting_material}")
-                    return None
-
-                return moves
-
         else:
             info = await get_top_lines(engine, board, 1)
             if info is None:
@@ -152,6 +142,16 @@ async def get_puzzle_solution(
             if best_move_score.is_mate():
                 # logger.info("Skipping puzzle: mate")
                 return None
+
+            if ply == PUZZLE_PLY:
+                board.push(best_move)
+                current_material = get_material(board)
+                won_material = current_material - starting_material >= MIN_MATERIAL_GAIN
+                if not won_material:
+                    # logger.info(f"Skipping puzzle: Didn't win enough material {current_material - starting_material}")
+                    return None
+
+                return moves
 
         board.push(best_move)
         moves.append(best_move)
