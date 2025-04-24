@@ -94,7 +94,7 @@ async def get_puzzle_solution(
         if board.turn == WHITE:
             info = await get_top_lines(engine, board, 2)
             if info is None or len(info) < 2:
-                logger.info("Skipping puzzle: not enough lines")
+                # logger.info("Skipping puzzle: not enough lines")
                 return None
 
             best_move = info[0]["pv"][0]
@@ -133,7 +133,7 @@ async def get_puzzle_solution(
         else:
             info = await get_top_lines(engine, board, 1)
             if info is None:
-                logger.info("Skipping puzzle: not enough lines")
+                # logger.info("Skipping puzzle: not enough lines")
                 return None
 
             best_move = info[0]["pv"][0]
@@ -148,8 +148,7 @@ async def get_puzzle_solution(
                 current_material = get_material(board)
                 won_material = current_material - starting_material >= MIN_MATERIAL_GAIN
                 if not won_material:
-                    logger.info(
-                        f"Skipping puzzle: Didn't win enough material {current_material - starting_material}")
+                    # logger.info(f"Skipping puzzle: Didn't win enough material {current_material - starting_material}")
                     return None
 
                 return moves
