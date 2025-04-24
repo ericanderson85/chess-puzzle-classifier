@@ -58,26 +58,30 @@ async def get_book_move(board: Board, reader: polyglot.MemoryMappedReader, logge
         return None
 
 
-def get_game(puzzle_path: str, logger: Logger) -> pgn.Game | None:
+def get_game(puzzle_path: str, logger: Logger | None) -> pgn.Game | None:
+    debug = logger.error if logger is not None else print
+
     try:
         with open(puzzle_path, 'r') as pgn_file:
             game = pgn.read_game(pgn_file)
             if game is None:
-                logger.warning(f"Invalid or empty PGN file: {puzzle_path}")
+                debug(f"Invalid or empty PGN file: {puzzle_path}")
                 return None
             return game
     except FileNotFoundError:
-        logger.error(f"File not found: {puzzle_path}")
+        debug(f"File not found: {puzzle_path}")
         return None
     except Exception as e:
-        logger.error(f"Error reading PGN file {puzzle_path}: {str(e)}")
+        debug(f"Error reading PGN file {puzzle_path}: {str(e)}")
         return None
 
 
-def write_game_to_file(game: pgn.Game, puzzle_path: str, logger: Logger) -> None:
+def write_game_to_file(game: pgn.Game, puzzle_path: str, logger: Logger | None) -> None:
+    debug = logger.error if logger is not None else print
+
     try:
         with open(puzzle_path, 'w') as file:
-            file.write(str(game))
+            file.write(str(game) + "\n")
     except Exception as e:
-        logger.error(f"Error writing PGN file {puzzle_path}: {str(e)}")
+        debug(f"Error writing PGN file {puzzle_path}: {str(e)}")
         return None

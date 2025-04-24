@@ -8,9 +8,8 @@ from chess import PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
 from chess.engine import UciProtocol, InfoDict, popen_uci
 
 from src.util.config import (
-    FIND_PUZZLES_LOG_PATH, GAMES_DIRECTORY, PIECE_VALUES, PUZZLE_ANALYSIS_ENGINE, CPU_COUNT, EVAL_THRESHOLD,
-    MIN_MATERIAL_GAIN, MIN_WHITE_BETTER_THAN_NEXT_MOVE, MIN_PUZZLE_LENGTH_PLY,
-    MAX_PUZZLE_LENGTH_PLY, ENGINE_PATHS, PUZZLES_DIRECTORY
+    FIND_PUZZLES_LOG_PATH, GAMES_DIRECTORY, PIECE_VALUES, PUZZLE_ANALYSIS_ENGINE, CPU_COUNT, EVALUATION_THRESHOLD,
+    MIN_MATERIAL_GAIN, MIN_WHITE_BETTER_THAN_NEXT_MOVE, ENGINE_PATHS, PUZZLE_PLY, PUZZLES_DIRECTORY
 )
 from src.util.chess_util import (
     get_material, get_top_lines
@@ -62,10 +61,6 @@ async def close_engine_pool(logger: Logger) -> None:
             f"Error during engine pool shutdown: {str(e)}", exc_info=True)
 
 
-def should_stop_searching(board: Board, ply: int) -> bool:
-    return board.is_game_over() or ply > MAX_PUZZLE_LENGTH_PLY
-
-
 def is_significant_move_diff(board: Board, info: list[InfoDict]) -> bool:
     if board.turn == BLACK:
         return True
@@ -82,19 +77,7 @@ def is_significant_move_diff(board: Board, info: list[InfoDict]) -> bool:
     if second.is_mate():
         return second.mate() < 0
 
-    return second.score() < EVAL_THRESHOLD and best.score() - second.score() >= MIN_WHITE_BETTER_THAN_NEXT_MOVE
-
-
-def is_valid_puzzle(board: Board, starting_material: int, ply: int) -> bool:
-    if board.turn == BLACK:
-        return False
-    if ply < MIN_PUZZLE_LENGTH_PLY:
-        return False
-
-    if get_material(board) - starting_material < MIN_MATERIAL_GAIN:
-        return False
-
-    return True
+    return second.score() < EVALUATION_THRESHOLD and best.score() - second.score() >= MIN_WHITE_BETTER_THAN_NEXT_MOVE
 
 
 async def get_puzzle_solution(
@@ -105,7 +88,8 @@ async def get_puzzle_solution(
     moves: list[Move],
     logger: Logger
 ) -> list[Move] | None:
-    if should_stop_searching(board, ply):
+
+    if board.is_game_over():
         return None
 
     num_lines = 2 if board.turn == WHITE else 1
@@ -118,31 +102,33 @@ async def get_puzzle_solution(
 
         best_move = info[0]["pv"][0]
         best_move_score = info[0]["score"].white()
-        if best_move_score.is_mate() or best_move_score.score() < EVAL_THRESHOLD:
+        if best_move_score.is_mate() or best_move_score.score() < EVALUATION_THRESHOLD:
             return None
 
         if ply == 0:
             if board.is_capture(best_move):
                 piece_moved = board.piece_type_at(best_move.from_square)
                 piece_taken = board.piece_type_at(best_move.to_square)
-                if PIECE_VALUES[piece_taken] > PIECE_VALUES[piece_moved]:
+
+                is_winning_capture = PIECE_VALUES[piece_taken] > PIECE_VALUES[piece_moved]
+                is_undefended = len(board.attackers(BLACK, best_move.to_square)) == 0
+                if is_winning_capture or is_undefended:
                     return None
+
             if best_move.promotion is not None and best_move.promotion == QUEEN:
                 return None
 
         if not is_significant_move_diff(board, info):
             return None
 
-        moves.append(best_move)
+        if ply == PUZZLE_PLY:
+            won_material = get_material(board) - starting_material >= MIN_MATERIAL_GAIN
+            return moves if won_material else None
+
         board.push(best_move)
+        moves.append(best_move)
 
-        if is_valid_puzzle(board, starting_material, ply):
-            solution = moves.copy()
-            return await get_puzzle_solution(engine, board, starting_material, ply + 1, moves, logger) or solution
-
-        return await get_puzzle_solution(
-            engine, board, starting_material, ply + 1, moves, logger
-        )
+        return await get_puzzle_solution(engine, board, starting_material, ply + 1, moves, logger)
 
     except Exception as e:
         logger.warning(
