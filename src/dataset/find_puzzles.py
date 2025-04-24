@@ -61,10 +61,7 @@ async def close_engine_pool(logger: Logger) -> None:
             f"Error during engine pool shutdown: {str(e)}", exc_info=True)
 
 
-def is_significant_move_diff(board: Board, info: list[InfoDict]) -> bool:
-    if board.turn == BLACK:
-        return True
-
+def is_significant_move_diff(info: list[InfoDict]) -> bool:
     if len(info) < 2:
         return False
 
@@ -92,42 +89,51 @@ async def get_puzzle_solution(
     if board.is_game_over():
         return None
 
-    num_lines = 2 if board.turn == WHITE else 1
-
     try:
-        info = await get_top_lines(engine, board, num_lines)
-
-        if len(info) < num_lines:
-            return None
-
-        best_move = info[0]["pv"][0]
-        best_move_score = info[0]["score"].white()
-        if best_move_score.is_mate() or best_move_score.score() < EVALUATION_THRESHOLD:
-            return None
-
-        if ply == 0:
-            if board.is_capture(best_move) and not board.is_en_passant(best_move):
-                piece_moved = board.piece_type_at(best_move.from_square)
-                piece_taken = board.piece_type_at(best_move.to_square)
-
-                is_winning_capture = PIECE_VALUES[piece_taken] > PIECE_VALUES[piece_moved]
-                is_undefended = len(board.attackers(BLACK, best_move.to_square)) == 0
-                if is_winning_capture or is_undefended:
-                    return None
-
-            if best_move.promotion is not None and best_move.promotion == QUEEN:
+        if board.turn == WHITE:
+            info = await get_top_lines(engine, board, 2)
+            if info is None or len(info) < 2:
                 return None
 
-        if not is_significant_move_diff(board, info):
-            return None
+            best_move = info[0]["pv"][0]
+            best_move_score = info[0]["score"].white()
 
-        if ply == PUZZLE_PLY:
-            won_material = get_material(board) - starting_material >= MIN_MATERIAL_GAIN
-            return moves if won_material else None
+            if best_move_score.is_mate() or best_move_score.score() < EVALUATION_THRESHOLD:
+                return None
+
+            if ply == 0:
+                if board.is_capture(best_move) and not board.is_en_passant(best_move):
+                    piece_moved = board.piece_type_at(best_move.from_square)
+                    piece_taken = board.piece_type_at(best_move.to_square)
+
+                    is_winning_capture = PIECE_VALUES[piece_taken] > PIECE_VALUES[piece_moved]
+                    is_undefended = len(board.attackers(BLACK, best_move.to_square)) == 0
+                    if is_winning_capture or is_undefended:
+                        return None
+
+                if best_move.promotion is not None and best_move.promotion == QUEEN:
+                    return None
+
+            if not is_significant_move_diff(info):
+                return None
+
+            if ply == PUZZLE_PLY:
+                won_material = get_material(board) - starting_material >= MIN_MATERIAL_GAIN
+                return moves if won_material else None
+
+        else:
+            info = await get_top_lines(engine, board, 1)
+            if info is None:
+                return None
+
+            best_move = info[0]["pv"][0]
+            best_move_score = info[0]["score"].black()
+
+            if best_move_score.is_mate():
+                return None
 
         board.push(best_move)
         moves.append(best_move)
-
         return await get_puzzle_solution(engine, board, starting_material, ply + 1, moves, logger)
 
     except Exception as e:
