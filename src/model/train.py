@@ -1,4 +1,3 @@
-
 from logging import Logger
 import torch
 import torch.nn as nn
@@ -54,8 +53,7 @@ def get_dataloaders(labeled_dataset: LabeledPuzzleDataset, unlabeled_dataset: Un
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE,
                              shuffle=False) if test_size > 0 else None
 
-    unlabeled_train_loader = DataLoader(
-        unlabeled_dataset, batch_size=BATCH_SIZE, shuffle=True) if test_size > 0 else None
+    unlabeled_train_loader = DataLoader(unlabeled_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
     return labeled_train_loader, unlabeled_train_loader, validation_loader, test_loader
 
@@ -66,7 +64,6 @@ def train_one_epoch(
     unlabeled_loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     loss_fn: nn.Module,
-    is_semi_supervised: bool,
     logger: Logger,
 ):
     model.train()
@@ -77,11 +74,11 @@ def train_one_epoch(
     processed_unlabeled_samples = 0
     pseudo_labels_used = 0
 
-    num_unlabeled_batches = len(unlabeled_loader) if is_semi_supervised else 0
+    num_unlabeled_batches = len(unlabeled_loader)
     num_labeled_batches = len(labeled_loader)
 
     labeled_iter = iter(labeled_loader)
-    unlabeled_iter = iter(unlabeled_loader) if is_semi_supervised else None
+    unlabeled_iter = iter(unlabeled_loader)
 
     steps_per_epoch = max(num_labeled_batches, num_unlabeled_batches)
 
@@ -92,13 +89,15 @@ def train_one_epoch(
             labeled_iter = iter(labeled_loader)
             labeled_boards, labels = next(labeled_iter)
 
-        labeled_boards, labels = labeled_boards.to(DEVICE), labels.to(DEVICE)
+        labeled_boards = labeled_boards.to(DEVICE)
+        labels = labels.to(DEVICE)
+
         batch_size_labeled = labeled_boards.size(0)
         processed_labeled_samples += batch_size_labeled
 
         unsupervised_loss = torch.tensor(0.0, device=DEVICE)
         batch_size_unlabeled = 0
-        if is_semi_supervised and num_unlabeled_batches > 0:
+        if LEARNING_TYPE == LearningType.SEMI_SUPERVISED and num_unlabeled_batches > 0:
             try:
                 unlabeled_boards = next(unlabeled_iter)
             except StopIteration:
@@ -137,7 +136,7 @@ def train_one_epoch(
         optimizer.step()
 
         total_labeled_loss += supervised_loss.item() * batch_size_labeled
-        if is_semi_supervised:
+        if LEARNING_TYPE == LearningType.SEMI_SUPERVISED:
             total_unlabeled_loss += unsupervised_loss.item() * mask.sum().item()
 
         predictions = torch.argmax(labeled_outputs, dim=1)
@@ -184,7 +183,6 @@ def gradient_descent(
     optimizer: optim.Optimizer,
     loss_fn: nn.Module,
     logger: Logger,
-    is_semi_supervised: bool = LEARNING_TYPE == LearningType.SEMI_SUPERVISED,
 ):
     validation_loss, validation_accuracy = validate(
         model, validation_loader, loss_fn, logger)
@@ -194,7 +192,10 @@ def gradient_descent(
         f"Validation Accuracy: {(validation_accuracy * 100):.2f}%"
     )
 
-    for epoch in range(NUM_EPOCHS):
+    best_validation_accuracy = 0
+    best_epoch = 0
+
+    for epoch in range(1, NUM_EPOCHS + 1):
         (
             train_labeled_loss,
             train_unlabeled_loss,
@@ -207,7 +208,6 @@ def gradient_descent(
             unlabeled_train_loader,
             optimizer,
             loss_fn,
-            is_semi_supervised,
             logger,
         )
 
@@ -215,14 +215,18 @@ def gradient_descent(
             model, validation_loader, loss_fn, logger
         )
 
+        if validation_accuracy > best_validation_accuracy:
+            best_epoch = epoch
+            best_validation_accuracy = validation_accuracy
+
         log_msg = (
-            f"Epoch [{epoch+1}/{NUM_EPOCHS}]\n"
+            f"Epoch [{epoch}/{NUM_EPOCHS}]\n"
             f"\tTrain Labeled Loss: {train_labeled_loss:.4f}\n"
             f"\tTrain Accuracy: {(train_accuracy * 100):.2f}%\n"
             f"\tValidation Loss: {validation_loss:.4f}\n"
             f"\tValidation Accuracy: {(validation_accuracy * 100):.2f}%\n"
         )
-        if is_semi_supervised:
+        if LEARNING_TYPE == LearningType.SEMI_SUPERVISED:
             unlab_fraction = pseudo_labels_used / unlabeled_processed if unlabeled_processed > 0 else 0
             log_msg += (
                 f"\tTrain Unlabeled Loss: {train_unlabeled_loss:.4f}\n"
@@ -230,9 +234,12 @@ def gradient_descent(
             )
         logger.info(log_msg)
 
+    logger.info(
+        f"Best Epoch: {best_epoch}\n"
+        f"\tValidation Accuracy: {(best_validation_accuracy*100):.2f}%"
+    )
     if test_loader and len(test_loader.dataset) > 0:
-        test_loss, test_accuracy = validate(
-            model, test_loader, loss_fn, logger)
+        test_loss, test_accuracy = validate(model, test_loader, loss_fn, logger)
         logger.info(
             f"Final Test Loss: {test_loss:.4f} | Final Test Accuracy: {(test_accuracy*100):.2f}%")
 

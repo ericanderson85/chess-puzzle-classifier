@@ -179,7 +179,7 @@ def scatter_plot(
     ylabel: str,
     labels: list[str] | None = None,
 ) -> plt.Figure:
-    logger.info(f"Creating scatter plot: {title or DEFAULT_SCATTER_TITLE}")
+
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
     y_data = [y] if isinstance(y, np.ndarray) and y.ndim == 1 else y
@@ -224,7 +224,7 @@ def step_plot(
     ylabel: str,
     labels: list[str] | None = None,
 ) -> plt.Figure:
-    logger.info(f"Creating step plot: {title or DEFAULT_STEP_TITLE}")
+
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
     y_data = [y] if isinstance(y, np.ndarray) and y.ndim == 1 else y
@@ -267,7 +267,7 @@ def bar_chart(
     ylabel: str,
     labels: list[str] | None = None,
 ) -> plt.Figure:
-    logger.info(f"Creating bar chart: {title or DEFAULT_BAR_TITLE}")
+
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
     is_single_series = isinstance(y, np.ndarray) and y.ndim == 1
@@ -336,7 +336,7 @@ def fill_between(
     ylabel: str,
     label: str | None = None,
 ) -> plt.Figure:
-    logger.info(f"Creating fill between plot: {title or DEFAULT_FILL_TITLE}")
+
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
     fill_color = COLOR_CYCLE[0]
@@ -364,7 +364,7 @@ def box_plot(
     ylabel: str,
     labels: list[str] | None = None,
 ) -> plt.Figure:
-    logger.info(f"Creating box plot: {title or DEFAULT_BOX_TITLE}")
+
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
     box_data = []
@@ -415,7 +415,7 @@ def histogram(
     ylabel: str,
     labels: list[str] | None = None,
 ) -> plt.Figure:
-    logger.info(f"Creating histogram: {title or DEFAULT_HIST_TITLE}")
+
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
     data_sets = [data] if isinstance(data, np.ndarray) and data.ndim == 1 else data

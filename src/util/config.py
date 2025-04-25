@@ -1,4 +1,5 @@
 from enum import Enum, auto
+import random
 from chess import PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
 from torch import nn, optim
 import os
@@ -76,15 +77,15 @@ CPU_COUNT = os.cpu_count()
 
 # Model parameters
 PUZZLE_CLASSES = [
-    'alignment',  # pins, skewers, xray, discovered
+    'alignment',  # pins, skewers, discovered
     'fork',       # one piece attacks two or more targets
     'promotion',  # pawn promotions
 ]
 
 DATA_SPLIT = {
-    'train': 0.8,
+    'train': 0.6,
     'validate': 0.2,
-    'test': 0
+    'test': 0.2
 }
 
 
@@ -109,8 +110,8 @@ class PuzzleRepresentation(Enum):
 
 
 LEARNING_TYPE = LearningType.SUPERVISED
-UNSUPERVISED_LOSS_WEIGHT = 0.5
-LABEL_CONFIDENCE_THRESHOLD = 0.90
+UNSUPERVISED_LOSS_WEIGHT = 0.35
+LABEL_CONFIDENCE_THRESHOLD = 0.95
 
 BOARD_REPRESENTATION = BoardRepresentation.PIECE_INDEX
 PUZZLE_REPRESENTATION = PuzzleRepresentation.FEW
@@ -154,9 +155,10 @@ ACTIVATION_FUNCTION: nn.Module = nn.ReLU
 ACTIVE_LEARNING_LOG_PATH = "logs/active_learning.log"
 TRAIN_LOG_PATH = "logs/train.log"
 RANDOM_SEED = 63
+random.seed(63)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-NUM_EPOCHS = 50
-BATCH_SIZE = 16
+NUM_EPOCHS = 100
+BATCH_SIZE = 32
 LEARNING_RATE = 0.0005
 REGULARIZATION = 0
 LOSS_FUNCTION: nn.Module = nn.CrossEntropyLoss

@@ -191,7 +191,7 @@ class UnlabeledPuzzleDataset(Dataset):
         return len(self.puzzles)
 
     def __getitem__(self, idx) -> torch.Tensor:
-        return self.puzzles[idx], idx
+        return self.puzzles[idx]
 
     def get_puzzle_id(self, idx) -> int:
         return self.puzzle_ids[idx]

@@ -12,6 +12,8 @@ data/
 
 logs/
 
+plots/
+
 engines/
 
 # Distribution / packaging

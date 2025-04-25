@@ -1,4 +1,3 @@
-from typing import List
 from src.util.config import PIECE_VALUES
 from chess import Board, Move
 import os
@@ -35,7 +34,7 @@ def generate_ray_squares(
         next_rank += delta_rank
 
 
-def convert_bitmask_to_squares(bitmask: int) -> List[int]:
+def convert_bitmask_to_squares(bitmask: int) -> list[int]:
 
     return [
         square
@@ -48,7 +47,7 @@ def get_piece_positions(
     board: chess.Board,
     piece_type: chess.PieceType,
     color: bool
-) -> List[int]:
+) -> list[int]:
 
     return [
         square
@@ -71,7 +70,7 @@ def is_clear_path(board: chess.Board, start: int, end: int) -> bool:
 def get_alignment_and_direction(
     queen_square: int,
     target_square: int
-) -> Tuple[bool, Tuple[int, int], List[chess.PieceType]]:
+) -> Tuple[bool, Tuple[int, int], list[chess.PieceType]]:
 
     if queen_square == target_square:
         return False, (0, 0), []
@@ -104,7 +103,7 @@ def is_queen_pin_in_direction(
         piece_square: int,
         direction: Tuple[int, int],
         friendly_color: bool,
-        attacker_types: List[chess.PieceType]
+        attacker_types: list[chess.PieceType]
 ) -> bool:
 
     for ray_square in generate_ray_squares(piece_square, direction):
@@ -177,11 +176,11 @@ def find_fork_targets(
         attack_square: int,
         mover_color: bool,
         moved_value: int
-) -> List[int]:
+) -> list[int]:
 
     opponent_color = not mover_color
     attacked_squares = convert_bitmask_to_squares(board.attacks(attack_square))
-    fork_targets: List[int] = []
+    fork_targets: list[int] = []
     for target_square in attacked_squares:
         target_piece = board.piece_at(target_square)
         if (not target_piece
@@ -198,7 +197,7 @@ def find_fork_targets(
 def has_fork_attack_move(
     board: chess.Board,
     origin_square: int,
-    target_squares: List[int]
+    target_squares: list[int]
 ) -> bool:
 
     for move in board.legal_moves:
@@ -222,17 +221,95 @@ def has_defensive_capture(
     return False
 
 
-def detect_alignment(board: chess.Board, move: chess.Move) -> bool:
-    return False
-
-
-def detect_alignment(board: Board, moves: List[Move]) -> bool:
+def detect_alignment(board: Board, moves: list[Move]) -> bool:
     board1 = board.copy()
     board1.push(moves[0])
+
+    moved_piece = board1.piece_at(moves[0].to_square)
+    if moved_piece is None:
+        return False
+
+    mover_color = moved_piece.color
+    opponent_color = not mover_color
+    moved_square = moves[0].to_square
+    moved_value = PIECE_VALUES[moved_piece.piece_type]
+
+    tactic_victims = set()
+
+    for square in chess.SQUARES:
+        piece = board1.piece_at(square)
+        if piece and piece.color == opponent_color:
+            if is_pinned(board1, square, opponent_color):
+                tactic_victims.add(square)
+
+    for piece_type in [chess.QUEEN, chess.ROOK, chess.BISHOP]:
+        attacker_squares = get_piece_positions(board1, piece_type, mover_color)
+        for attacker_square in attacker_squares:
+            directions = []
+            if piece_type in [chess.QUEEN, chess.ROOK]:
+                directions.extend([(0, 1), (1, 0), (0, -1), (-1, 0)])
+            if piece_type in [chess.QUEEN, chess.BISHOP]:
+                directions.extend([(1, 1), (1, -1), (-1, 1), (-1, -1)])
+
+            for direction in directions:
+                ray = list(generate_ray_squares(attacker_square, direction))
+
+                victims = []
+                for ray_square in ray:
+                    piece = board1.piece_at(ray_square)
+                    if piece:
+                        if piece.color == opponent_color:
+                            victims.append((ray_square, PIECE_VALUES[piece.piece_type]))
+                        break
+
+                if len(victims) >= 2 and victims[1][1] > victims[0][1]:
+                    tactic_victims.add(victims[1][0])
+
+    attacks_before = set()
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece and piece.color == mover_color and square != moves[0].from_square:
+            attacks_before.update(convert_bitmask_to_squares(board.attacks_mask(square)))
+
+    attacks_after = set()
+    for square in chess.SQUARES:
+        piece = board1.piece_at(square)
+        if piece and piece.color == mover_color and square != moved_square:
+            attacks_after.update(convert_bitmask_to_squares(board1.attacks_mask(square)))
+
+    discovered_attacks = attacks_after - attacks_before
+    for attack_square in discovered_attacks:
+        piece = board1.piece_at(attack_square)
+        if piece and piece.color == opponent_color:
+            tactic_victims.add(attack_square)
+
+    if not tactic_victims:
+        return False
+
+    for move_index in [1, 2]:
+        next_move = moves[move_index]
+        if next_move.to_square in tactic_victims and board1.is_capture(next_move):
+            return True
+
+    if len(moves) > 1 and moves[1].to_square == moved_square and board1.is_capture(moves[1]):
+        attacker_square = moves[1].from_square
+        attacker_piece = board1.piece_at(attacker_square)
+
+        if attacker_piece and PIECE_VALUES[attacker_piece.piece_type] < moved_value:
+            board2 = board1.copy()
+            board2.push(moves[1])
+
+            if len(moves) > 2 and moves[2].to_square == moved_square and board2.is_capture(moves[2]):
+                recaptor_square = moves[2].from_square
+                recaptor_piece = board2.piece_at(recaptor_square)
+
+                if recaptor_piece and PIECE_VALUES[recaptor_piece.piece_type] > PIECE_VALUES[attacker_piece.piece_type]:
+                    return True
+
     return False
 
 
-def detect_fork(board: Board, moves: List[Move]) -> bool:
+def detect_fork(board: Board, moves: list[Move]) -> bool:
     board1 = board.copy()
     board1.push(moves[0])
     moved_square = moves[0].to_square
@@ -266,58 +343,38 @@ def detect_fork(board: Board, moves: List[Move]) -> bool:
     return False
 
 
-def detect_promotion(board: Board, moves: List[Move]) -> bool:
+def detect_promotion(moves: list[Move]) -> bool:
     if moves[0].promotion is not None or moves[2].promotion is not None:
         return True
-
-    board.push(moves[0])
-    board.push(moves[1])
-
-    if board.piece_type_at(moves[2].from_square) == chess.PAWN and not board.is_capture(moves[2]):
-        raise Exception('yes')
 
     return False
 
 
 def classify_puzzle(
-    game: chess.pgn.Game,
-    logger,
-    model_prediction: float | None = None
+    game: chess.pgn.Game
 ) -> str | None:
     fen = game.headers.get("FEN")
     if fen is None:
         raise ValueError("No FEN header")
 
-    base_board = Board(fen)
+    board = Board(fen)
 
-    moves: List[Move] = []
+    moves: list[Move] = []
     node = game
-    for ply in range(3):
+    for _ in range(3):
         if not node.variations:
             raise ValueError("Puzzle has fewer than 3 moves")
         node = node.variations[0]
         moves.append(node.move)
 
-    is_alignment = detect_alignment(base_board, moves)
-    is_fork = detect_fork(base_board, moves)
-    try:
-        is_promotion = detect_promotion(base_board, moves)
-    except:
-        print(str(game) + '\n')
-        is_promotion = True
+    if detect_promotion(moves):
+        return "promotion"
+    if detect_fork(board.copy(), moves):
+        return "fork"
+    if detect_alignment(board.copy(), moves):
+        return "alignment"
 
-    if not (is_alignment or is_fork or is_promotion):
-        return None
-
-    labels = []
-    if is_alignment:
-        labels.append("alignment")
-    if is_fork:
-        labels.append("fork")
-    if is_promotion:
-        labels.append("promotion")
-
-    return " ".join(labels)
+    return None
 
 
 def main():
@@ -344,17 +401,16 @@ def main():
             if 'Label' in game.headers:
                 del game.headers['Label']
 
-            logger.info(f'Attempting to classify puzzle {puzzle_id}')
-            label = classify_puzzle(game, logger)
+            label = classify_puzzle(game)
             if label is None:
                 unlabeled_count += 1
                 continue
 
-            if 'alignment' in label:
+            if label == 'alignment':
                 alignment_count += 1
-            if 'fork' in label:
+            if label == 'fork':
                 fork_count += 1
-            if 'promotion' in label:
+            if label == 'promotion':
                 promotion_count += 1
 
             logger.info(f'Classified puzzle {puzzle_id} as {label}')
