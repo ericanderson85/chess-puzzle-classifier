@@ -260,8 +260,9 @@ async def main(logger: Logger) -> None:
                 filter(lambda game: game.isnumeric(), current_games))
             current_games = list(
                 map(lambda game_str: int(game_str), current_games))
-            game_id = max(current_games) + 1
-            logger.info(f"New games start at id {game_id}")
+            if current_games:
+                game_id = max(current_games) + 1
+                logger.info(f"New games start at id {game_id}")
         else:
             os.makedirs(GAMES_DIRECTORY)
 
