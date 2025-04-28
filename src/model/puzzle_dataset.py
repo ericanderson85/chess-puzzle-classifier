@@ -5,20 +5,20 @@ from chess import Board, pgn, WHITE
 import torch
 from torch.utils.data import Dataset
 
-from src.util.config import FEW_PUZZLE_COUNT, LEARNING_TYPE, PUZZLE_CLASSES, PUZZLE_REPRESENTATION, PUZZLES_DIRECTORY, TRAIN_LOG_PATH, BoardRepresentation, BOARD_REPRESENTATION, PIECE_INDICES_MAP, LearningType, PuzzleRepresentation
 from src.util.chess_util import get_game
+from src.util.config import Config, BoardRepresentation, PuzzleRepresentation
 
 
-def get_board_tensor(board: Board) -> torch.Tensor:
+def get_board_tensor(config: Config, board: Board) -> torch.Tensor:
     """
     Depending on BOARD_REPRESENTATION, the output will be:
       - PIECE_INDEX (each square gets the piece's index, signed for color)
       - SIGNED_ONE_HOT (6 channels, one per piece type with sign for color)
       - ONE_HOT (12 channels, separated for white and black)
     """
-    channels, height, width = BOARD_REPRESENTATION.value
+    channels, height, width = config.BOARD_REPRESENTATION.value
 
-    if BOARD_REPRESENTATION == BoardRepresentation.PIECE_INDEX:
+    if config.BOARD_REPRESENTATION == BoardRepresentation.PIECE_INDEX:
         board_matrix = [[0 for _ in range(width)] for _ in range(height)]
         for file in range(8):
             for rank in range(8):
@@ -26,13 +26,13 @@ def get_board_tensor(board: Board) -> torch.Tensor:
                 piece_type = board.piece_at(square)
                 if piece_type is None:
                     continue
-                piece_index = PIECE_INDICES_MAP[piece_type.symbol()]
+                piece_index = config.PIECE_INDICES_MAP[piece_type.symbol()]
                 board_matrix[rank][file] = piece_index
 
         board_tensor = torch.tensor(board_matrix, dtype=torch.float32)
         board_tensor = board_tensor.unsqueeze(0)
 
-    elif BOARD_REPRESENTATION == BoardRepresentation.SIGNED_ONE_HOT:
+    elif config.BOARD_REPRESENTATION == BoardRepresentation.PIECE_TYPES:
         board_matrix = [[[0 for _ in range(6)] for _ in range(width)]
                         for _ in range(height)]
         for file in range(8):
@@ -67,7 +67,7 @@ def get_board_tensor(board: Board) -> torch.Tensor:
     return board_tensor
 
 
-def get_puzzle_tensor_from_game(game: pgn.Game) -> torch.Tensor:
+def get_puzzle_tensor_from_game(config: Config, game: pgn.Game) -> torch.Tensor:
     """""
     Depending on PUZZLE_REPRESENTATION, the output will be:
       - FIRST_ONLY (only the starting board)
@@ -81,32 +81,32 @@ def get_puzzle_tensor_from_game(game: pgn.Game) -> torch.Tensor:
     else:
         raise ValueError('PGN missing FEN header')
 
-    boards = [get_board_tensor(board)]
+    boards = [get_board_tensor(config, board)]
 
     node = game
     while node.variations:
         move = node.variation(0).move
         board.push(move)
-        boards.append(get_board_tensor(board))
+        boards.append(get_board_tensor(config, board))
         node = node.variation(0)
 
-    if PUZZLE_REPRESENTATION == PuzzleRepresentation.FIRST:
+    if config.PUZZLE_REPRESENTATION == PuzzleRepresentation.FIRST:
         selected = boards[0:1]
 
-    elif PUZZLE_REPRESENTATION == PuzzleRepresentation.FIRST_AND_LAST:
+    elif config.PUZZLE_REPRESENTATION == PuzzleRepresentation.FIRST_AND_LAST:
         selected = [boards[0], boards[-1]]
 
     else:
         n = len(boards)
-        if n < FEW_PUZZLE_COUNT:
+        if n < config.PUZZLE_REPRESENTATION.value:
             # Pad the list with zeros
             zeros_tensor = torch.zeros_like(boards[0])
-            selected = boards + [zeros_tensor] * (FEW_PUZZLE_COUNT - n)
-        elif n > FEW_PUZZLE_COUNT:
+            selected = boards + [zeros_tensor] * (config.PUZZLE_REPRESENTATION.value - n)
+        elif n > config.PUZZLE_REPRESENTATION.value:
             # Sample evenly from the puzzle, including first and last
             indices = [
-                int(round(i * (n - 1) / (FEW_PUZZLE_COUNT - 1)))
-                for i in range(FEW_PUZZLE_COUNT)
+                int(round(i * (n - 1) / (config.PUZZLE_REPRESENTATION.value - 1)))
+                for i in range(config.PUZZLE_REPRESENTATION.value)
             ]
             selected = [boards[i] for i in indices]
         else:
@@ -116,14 +116,14 @@ def get_puzzle_tensor_from_game(game: pgn.Game) -> torch.Tensor:
     return puzzle_tensor
 
 
-def load_puzzles(logger: Logger) -> tuple[list[torch.Tensor], list[int], list[torch.Tensor]]:
+def load_puzzles(config: Config, logger: Logger) -> tuple[list[torch.Tensor], list[int], list[torch.Tensor]]:
     labeled_puzzles = []
     labeled_puzzle_ids = []
     labels = []
     unlabeled_puzzles = []
     unlabeled_puzzle_ids = []
 
-    puzzle_ids = os.listdir(PUZZLES_DIRECTORY)
+    puzzle_ids = os.listdir(config.PUZZLES_DIRECTORY)
     puzzle_ids = filter(lambda file: file.endswith(".pgn"), puzzle_ids)
     puzzle_ids = list(map(lambda file: int(file[:-4]), puzzle_ids))
     puzzle_ids.sort()
@@ -132,22 +132,22 @@ def load_puzzles(logger: Logger) -> tuple[list[torch.Tensor], list[int], list[to
     unlabeled_count = 0
 
     for puzzle_id in puzzle_ids:
-        pgn_path = os.path.join(PUZZLES_DIRECTORY, f"{puzzle_id}.pgn")
+        pgn_path = os.path.join(config.PUZZLES_DIRECTORY, f"{puzzle_id}.pgn")
 
         try:
-            game = get_game(pgn_path, logger)
+            game = get_game(config, pgn_path, logger)
 
-            puzzle_tensor = get_puzzle_tensor_from_game(game)
+            puzzle_tensor = get_puzzle_tensor_from_game(config, game)
             if puzzle_tensor is None:
                 logger.warning(f"Could not create tensor for {puzzle_id}")
                 continue
 
             label_string = game.headers.get("Label", None)
 
-            if label_string and label_string in PUZZLE_CLASSES:
+            if label_string and label_string in config.PUZZLE_CLASSES:
                 labeled_puzzles.append(puzzle_tensor)
                 labeled_puzzle_ids.append(puzzle_id)
-                label_id = PUZZLE_CLASSES.index(label_string)
+                label_id = config.PUZZLE_CLASSES.index(label_string)
                 labels.append(label_id)
                 labeled_count += 1
             else:
@@ -197,9 +197,13 @@ class UnlabeledPuzzleDataset(Dataset):
         return self.puzzle_ids[idx]
 
 
-def get_datasets(logger: Logger) -> tuple[LabeledPuzzleDataset, UnlabeledPuzzleDataset]:
+def get_datasets(
+    config: Config,
+    logger: Logger
+) -> tuple[LabeledPuzzleDataset, UnlabeledPuzzleDataset]:
+
     labeled_puzzles, labeled_puzzle_ids, labels, unlabeled_puzzles, unlabeled_puzzle_ids = load_puzzles(
-        logger)
+        config, logger)
     labled_dataset = LabeledPuzzleDataset(labeled_puzzles, labeled_puzzle_ids, labels)
     unlabled_dataset = UnlabeledPuzzleDataset(unlabeled_puzzles, unlabeled_puzzle_ids)
     return labled_dataset, unlabled_dataset

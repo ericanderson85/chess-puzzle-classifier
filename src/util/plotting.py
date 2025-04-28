@@ -22,7 +22,7 @@ YELLOW = '#D2D2A2'
 PLOT_BACKGROUND_COLOR = BLACK
 TEXT_COLOR = WHITE
 AXIS_COLOR = WHITE
-COLOR_CYCLE = [LIGHT_BLUE, ORANGE, PURPLE, GREEN, YELLOW]
+COLOR_CYCLE = [LIGHT_BLUE, GREEN, ORANGE, PURPLE, YELLOW]
 CUSTOM_FONT_PATH: str | None = '/Users/eric/Library/Fonts/Inter.ttc'
 DEFAULT_FONT_SIZE = 12
 TITLE_FONT_SIZE_OFFSET = 2
@@ -49,8 +49,11 @@ HIST_DENSITY = False
 HIST_EDGE_COLOR = AXIS_COLOR
 HIST_LINEWIDTH = 0.8
 ADJUST_HIST_ALPHA_OVERLAP = True
-
 MULTI_HIST_TYPE = 'stepfilled'
+
+LINE_LINE_WIDTH = 2.5
+LINE_ALPHA = 0.9
+LINE_X_AXIS_CONTINUOUS: bool = True
 
 
 PLOTS_DIRECTORY = 'plots/'
@@ -61,6 +64,7 @@ DEFAULT_BAR_FILENAME = "bar_chart.png"
 DEFAULT_FILL_FILENAME = "fill_between_plot.png"
 DEFAULT_BOX_FILENAME = "box_plot.png"
 DEFAULT_HIST_FILENAME = "histogram.png"
+DEFAULT_LINE_FILENAME = "line_plot.png"
 
 
 DEFAULT_SCATTER_TITLE = "Scatter Plot"
@@ -69,6 +73,7 @@ DEFAULT_BAR_TITLE = "Bar Chart"
 DEFAULT_FILL_TITLE = "Fill Between Plot"
 DEFAULT_BOX_TITLE = "Box Plot"
 DEFAULT_HIST_TITLE = "Histogram"
+DEFAULT_LINE_TITLE = "Line Plot"
 DEFAULT_X_LABEL = "X"
 DEFAULT_Y_LABEL = "Y"
 DEFAULT_BAR_X_LABEL = "Categories"
@@ -144,9 +149,10 @@ def _setup_plot_style(
 
 def _save_plot(
     fig: plt.Figure,
-    default_filename: str,
+    filename: str,
     logger: Logger,
 ) -> None:
+
     if not os.path.exists(PLOTS_DIRECTORY):
         try:
             os.makedirs(PLOTS_DIRECTORY)
@@ -155,7 +161,7 @@ def _save_plot(
             logger.error(f"Error creating directory {PLOTS_DIRECTORY}: {e}")
             return
 
-    filepath = os.path.join(PLOTS_DIRECTORY, default_filename)
+    filepath = os.path.join(PLOTS_DIRECTORY, filename)
     try:
         fig.savefig(
             filepath,
@@ -178,6 +184,7 @@ def scatter_plot(
     xlabel: str,
     ylabel: str,
     labels: list[str] | None = None,
+    filename: str = DEFAULT_SCATTER_FILENAME,
 ) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
@@ -202,7 +209,7 @@ def scatter_plot(
             color=color,
             edgecolor=AXIS_COLOR,
             linewidth=0.5,
-            ax=ax
+            ax=ax,
         )
 
     _setup_plot_style(
@@ -211,7 +218,7 @@ def scatter_plot(
         xlabel=xlabel or DEFAULT_X_LABEL,
         ylabel=ylabel or DEFAULT_Y_LABEL,
     )
-    _save_plot(fig, DEFAULT_SCATTER_FILENAME, logger)
+    _save_plot(fig, filename, logger)
     return fig
 
 
@@ -223,6 +230,7 @@ def step_plot(
     xlabel: str,
     ylabel: str,
     labels: list[str] | None = None,
+    filename: str = DEFAULT_STEP_FILENAME,
 ) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
@@ -245,7 +253,7 @@ def step_plot(
             linewidth=STEP_LINE_WIDTH,
             label=label,
             color=color,
-            alpha=0.9
+            alpha=0.9,
         )
 
     _setup_plot_style(
@@ -254,7 +262,7 @@ def step_plot(
         xlabel=xlabel or DEFAULT_X_LABEL,
         ylabel=ylabel or DEFAULT_Y_LABEL,
     )
-    _save_plot(fig, DEFAULT_STEP_FILENAME, logger)
+    _save_plot(fig, filename, logger)
     return fig
 
 
@@ -266,11 +274,18 @@ def bar_chart(
     xlabel: str,
     ylabel: str,
     labels: list[str] | None = None,
+    filename: str = DEFAULT_BAR_FILENAME,
 ) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
+    if type(x) is list:
+        x = [len(l) for l in x]
+    elif type(x) is str:
+        x = [l.replace("_", " ").title() for l in x]
+
     is_single_series = isinstance(y, np.ndarray) and y.ndim == 1
+
     y_data = [y] if is_single_series else y
     num_series = len(y_data)
     num_categories = len(x)
@@ -300,7 +315,9 @@ def bar_chart(
         for i, (yi, offset) in enumerate(zip(y_data, offsets)):
             color_idx = i % len(COLOR_CYCLE)
             label = (
-                labels[i] if labels and i < len(labels) else f"Series {i+1}"
+                labels[i]
+                if labels and i < len(labels)
+                else f"Series {i+1}"
             )
 
             ax.bar(
@@ -322,7 +339,7 @@ def bar_chart(
         xlabel=xlabel or DEFAULT_BAR_X_LABEL,
         ylabel=ylabel or DEFAULT_BAR_Y_LABEL,
     )
-    _save_plot(fig, DEFAULT_BAR_FILENAME, logger)
+    _save_plot(fig, filename, logger)
     return fig
 
 
@@ -335,6 +352,7 @@ def fill_between(
     xlabel: str,
     ylabel: str,
     label: str | None = None,
+    filename: str = DEFAULT_FILL_FILENAME,
 ) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
@@ -352,7 +370,7 @@ def fill_between(
         xlabel=xlabel or DEFAULT_X_LABEL,
         ylabel=ylabel or DEFAULT_Y_LABEL,
     )
-    _save_plot(fig, DEFAULT_FILL_FILENAME, logger)
+    _save_plot(fig, filename, logger)
     return fig
 
 
@@ -363,14 +381,17 @@ def box_plot(
     xlabel: str,
     ylabel: str,
     labels: list[str] | None = None,
+    filename: str = DEFAULT_BOX_FILENAME,
 ) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
-    box_data = []
-    group_labels = []
+    box_data: list[dict[str, float]] = []
+    group_labels: list[str] = []
     for i, group_data in enumerate(data):
-        group_label = labels[i] if labels and i < len(labels) else f"Group {i+1}"
+        group_label = (
+            labels[i] if labels and i < len(labels) else f"Group {i+1}"
+        )
         group_labels.append(group_label)
         for value in group_data:
             box_data.append({'Group': group_label, 'Value': value})
@@ -392,9 +413,9 @@ def box_plot(
             'markerfacecolor': BOX_FLIER_MARKER_FACE_COLOR,
             'markeredgecolor': BOX_FLIER_MARKER_EDGE_COLOR,
             'alpha': BOX_FLIER_ALPHA,
-            'markersize': 6
+            'markersize': 6,
         },
-        linewidth=1.5
+        linewidth=1.5,
     )
 
     _setup_plot_style(
@@ -403,7 +424,7 @@ def box_plot(
         xlabel=xlabel or DEFAULT_BOX_X_LABEL,
         ylabel=ylabel or DEFAULT_BOX_Y_LABEL,
     )
-    _save_plot(fig, DEFAULT_BOX_FILENAME, logger)
+    _save_plot(fig, filename, logger)
     return fig
 
 
@@ -414,11 +435,16 @@ def histogram(
     xlabel: str,
     ylabel: str,
     labels: list[str] | None = None,
+    filename: str = DEFAULT_HIST_FILENAME,
 ) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
-    data_sets = [data] if isinstance(data, np.ndarray) and data.ndim == 1 else data
+    data_sets = (
+        [data]
+        if isinstance(data, np.ndarray) and data.ndim == 1
+        else data
+    )
     num_series = len(data_sets)
 
     if num_series == 1:
@@ -432,39 +458,43 @@ def histogram(
             kde=False,
             edgecolor=HIST_EDGE_COLOR,
             linewidth=HIST_LINEWIDTH,
-            ax=ax
+            ax=ax,
         )
     else:
-
         current_alpha = HIST_ALPHA
         if ADJUST_HIST_ALPHA_OVERLAP and num_series > 1:
             current_alpha = max(0.3, HIST_ALPHA / (num_series * 0.8))
 
-        if MULTI_HIST_TYPE == 'stepfilled' or MULTI_HIST_TYPE == 'step':
-
+        if MULTI_HIST_TYPE in ('stepfilled', 'step'):
             hist_kwargs = {
                 'bins': HIST_BINS,
                 'density': HIST_DENSITY,
                 'edgecolor': HIST_EDGE_COLOR,
                 'linewidth': HIST_LINEWIDTH,
                 'alpha': current_alpha,
-                'histtype': MULTI_HIST_TYPE
+                'histtype': MULTI_HIST_TYPE,
             }
-
             for i, d in enumerate(data_sets):
                 color_idx = i % len(COLOR_CYCLE)
-                label = labels[i] if labels and i < len(labels) else f"Series {i+1}"
+                label = (
+                    labels[i]
+                    if labels and i < len(labels)
+                    else f"Series {i+1}"
+                )
                 ax.hist(
                     d,
                     color=COLOR_CYCLE[color_idx],
                     label=label,
-                    **hist_kwargs
+                    **hist_kwargs,
                 )
         else:
-
             for i, d in enumerate(data_sets):
                 color_idx = i % len(COLOR_CYCLE)
-                label = labels[i] if labels and i < len(labels) else f"Series {i+1}"
+                label = (
+                    labels[i]
+                    if labels and i < len(labels)
+                    else f"Series {i+1}"
+                )
                 sns.histplot(
                     d,
                     color=COLOR_CYCLE[color_idx],
@@ -475,7 +505,7 @@ def histogram(
                     edgecolor=HIST_EDGE_COLOR,
                     linewidth=HIST_LINEWIDTH,
                     ax=ax,
-                    element="bars"
+                    element="bars",
                 )
 
     _setup_plot_style(
@@ -484,5 +514,49 @@ def histogram(
         xlabel=xlabel or DEFAULT_HIST_X_LABEL,
         ylabel=ylabel or DEFAULT_HIST_Y_LABEL,
     )
-    _save_plot(fig, DEFAULT_HIST_FILENAME, logger)
+    _save_plot(fig, filename, logger)
+    return fig
+
+
+def line_plot(
+    x: np.ndarray,
+    y: np.ndarray | list[np.ndarray],
+    logger: Logger,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    labels: list[str] | None = None,
+    filename: str = DEFAULT_LINE_FILENAME,
+) -> plt.Figure:
+    fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
+
+    y_data = [y] if isinstance(y, np.ndarray) and y.ndim == 1 else y
+    num_series = len(y_data)
+
+    for i, yi in enumerate(y_data):
+        color = COLOR_CYCLE[i % len(COLOR_CYCLE)]
+        label = (
+            labels[i]
+            if labels and i < len(labels)
+            else (f"Series {i+1}" if num_series > 1 else None)
+        )
+        ax.plot(
+            x,
+            yi,
+            linewidth=LINE_LINE_WIDTH,
+            alpha=LINE_ALPHA,
+            color=color,
+            label=label,
+        )
+
+    if not LINE_X_AXIS_CONTINUOUS:
+        ax.set_xticks(x)
+
+    _setup_plot_style(
+        ax,
+        title=title or DEFAULT_LINE_TITLE,
+        xlabel=xlabel or DEFAULT_X_LABEL,
+        ylabel=ylabel or DEFAULT_Y_LABEL,
+    )
+    _save_plot(fig, filename, logger)
     return fig

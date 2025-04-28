@@ -3,14 +3,13 @@ import random
 from chess import Board, popcount, WHITE, BLACK, polyglot, pgn
 from chess.engine import UciProtocol, InfoDict, Limit
 
-from src.util.config import (ANALYSIS_DEPTH, PAWN_VALUE, KNIGHT_VALUE,
-                             BISHOP_VALUE, ROOK_VALUE, QUEEN_VALUE)
+from src.util.config import Config
 
 
-async def get_top_lines(engine: UciProtocol, board: Board, multipv: int) -> list[InfoDict]:
+async def get_top_lines(config: Config, engine: UciProtocol, board: Board, multipv: int) -> list[InfoDict]:
     info = await engine.analyse(
         board,
-        Limit(depth=ANALYSIS_DEPTH),
+        Limit(depth=config.ANALYSIS_DEPTH),
         multipv=multipv,
     )
 
@@ -19,24 +18,24 @@ async def get_top_lines(engine: UciProtocol, board: Board, multipv: int) -> list
     return info
 
 
-def get_material(board: Board) -> int:
+def get_material(config: Config, board: Board) -> int:
     white = board.occupied_co[WHITE]
     black = board.occupied_co[BLACK]
-    difference = (PAWN_VALUE * (popcount(white & board.pawns) -
-                                popcount(black & board.pawns))
-                  + KNIGHT_VALUE * (popcount(white & board.knights) -
-                                    popcount(black & board.knights))
-                  + BISHOP_VALUE * (popcount(white & board.bishops) -
-                                    popcount(black & board.bishops))
-                  + ROOK_VALUE * (popcount(white & board.rooks) -
-                                  popcount(black & board.rooks))
-                  + QUEEN_VALUE * (popcount(white & board.queens) -
-                                   popcount(black & board.queens)))
+    difference = (config.PAWN_VALUE * (popcount(white & board.pawns) -
+                                       popcount(black & board.pawns))
+                  + config.KNIGHT_VALUE * (popcount(white & board.knights) -
+                                           popcount(black & board.knights))
+                  + config.BISHOP_VALUE * (popcount(white & board.bishops) -
+                                           popcount(black & board.bishops))
+                  + config.ROOK_VALUE * (popcount(white & board.rooks) -
+                                         popcount(black & board.rooks))
+                  + config.QUEEN_VALUE * (popcount(white & board.queens) -
+                                          popcount(black & board.queens)))
 
     return difference
 
 
-async def get_book_move(board: Board, reader: polyglot.MemoryMappedReader, logger: Logger) -> polyglot.Entry | None:
+async def get_book_move(config: Config, board: Board, reader: polyglot.MemoryMappedReader, logger: Logger) -> polyglot.Entry | None:
     try:
         entries = list(reader.find_all(board))
         if not entries:
@@ -58,7 +57,7 @@ async def get_book_move(board: Board, reader: polyglot.MemoryMappedReader, logge
         return None
 
 
-def get_game(puzzle_path: str, logger: Logger | None) -> pgn.Game | None:
+def get_game(config: Config, puzzle_path: str, logger: Logger | None) -> pgn.Game | None:
     debug = logger.error if logger is not None else print
 
     try:
@@ -76,7 +75,7 @@ def get_game(puzzle_path: str, logger: Logger | None) -> pgn.Game | None:
         return None
 
 
-def write_game_to_file(game: pgn.Game, puzzle_path: str, logger: Logger | None) -> None:
+def write_game_to_file(config: Config, game: pgn.Game, puzzle_path: str, logger: Logger | None) -> None:
     debug = logger.error if logger is not None else print
 
     try:

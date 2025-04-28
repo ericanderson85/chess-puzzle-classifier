@@ -1,10 +1,9 @@
-from src.util.config import PIECE_VALUES
+from src.util.config import Config
 from chess import Board, Move
 import os
 from logging import Logger
 import chess
 from chess import pgn, Board, Move, WHITE, BLACK, Square
-from src.util.config import PIECE_VALUES, PUZZLES_DIRECTORY, CLASSIFY_PUZZLES_LOG_PATH, PUZZLE_CLASSES
 from src.util.chess_util import get_game, write_game_to_file
 from src.util.logger import get_logger
 
@@ -152,6 +151,7 @@ def is_pinned(
 
 
 def can_withstand_capture(
+    config: Config,
     board: chess.Board,
     square: int,
     mover_color: bool,
@@ -163,7 +163,7 @@ def can_withstand_capture(
     defender_squares = board.attackers(mover_color, square)
     for attacker_square in attacker_squares:
         attacker_piece = board.piece_at(attacker_square)
-        attacker_value = PIECE_VALUES[attacker_piece.piece_type]
+        attacker_value = config.PIECE_VALUES[attacker_piece.piece_type]
         if attacker_value < moved_value:
             return False
         if attacker_value > moved_value and not defender_squares:
@@ -172,6 +172,7 @@ def can_withstand_capture(
 
 
 def find_fork_targets(
+        config: Config,
         board: chess.Board,
         attack_square: int,
         mover_color: bool,
@@ -187,7 +188,7 @@ def find_fork_targets(
                 or target_piece.color != opponent_color
                 or target_piece.piece_type == chess.PAWN):
             continue
-        target_value = PIECE_VALUES[target_piece.piece_type]
+        target_value = config.PIECE_VALUES[target_piece.piece_type]
         target_defenders = board.attackers(opponent_color, target_square)
         if not target_defenders or target_value > moved_value:
             fork_targets.append(target_square)
@@ -208,6 +209,7 @@ def has_fork_attack_move(
 
 
 def has_defensive_capture(
+        config: Config,
         board: chess.Board,
         target_square: int,
         moved_value: int
@@ -216,12 +218,16 @@ def has_defensive_capture(
         if move.to_square != target_square or not board.is_capture(move):
             continue
         attacker_piece = board.piece_at(move.from_square)
-        if PIECE_VALUES[attacker_piece.piece_type] > moved_value:
+        if config.PIECE_VALUES[attacker_piece.piece_type] > moved_value:
             return True
     return False
 
 
-def detect_alignment(board: Board, moves: list[Move]) -> bool:
+def detect_alignment(
+    config: Config,
+    board: Board,
+    moves: list[Move]
+) -> bool:
     board1 = board.copy()
     board1.push(moves[0])
 
@@ -232,7 +238,7 @@ def detect_alignment(board: Board, moves: list[Move]) -> bool:
     mover_color = moved_piece.color
     opponent_color = not mover_color
     moved_square = moves[0].to_square
-    moved_value = PIECE_VALUES[moved_piece.piece_type]
+    moved_value = config.PIECE_VALUES[moved_piece.piece_type]
 
     tactic_victims = set()
 
@@ -259,7 +265,7 @@ def detect_alignment(board: Board, moves: list[Move]) -> bool:
                     piece = board1.piece_at(ray_square)
                     if piece:
                         if piece.color == opponent_color:
-                            victims.append((ray_square, PIECE_VALUES[piece.piece_type]))
+                            victims.append((ray_square, config.PIECE_VALUES[piece.piece_type]))
                         break
 
                 if len(victims) >= 2 and victims[1][1] > victims[0][1]:
@@ -295,7 +301,7 @@ def detect_alignment(board: Board, moves: list[Move]) -> bool:
         attacker_square = moves[1].from_square
         attacker_piece = board1.piece_at(attacker_square)
 
-        if attacker_piece and PIECE_VALUES[attacker_piece.piece_type] < moved_value:
+        if attacker_piece and config.PIECE_VALUES[attacker_piece.piece_type] < moved_value:
             board2 = board1.copy()
             board2.push(moves[1])
 
@@ -303,13 +309,18 @@ def detect_alignment(board: Board, moves: list[Move]) -> bool:
                 recaptor_square = moves[2].from_square
                 recaptor_piece = board2.piece_at(recaptor_square)
 
-                if recaptor_piece and PIECE_VALUES[recaptor_piece.piece_type] > PIECE_VALUES[attacker_piece.piece_type]:
+                if recaptor_piece and config.PIECE_VALUES[recaptor_piece.piece_type] > config.PIECE_VALUES[attacker_piece.piece_type]:
                     return True
 
     return False
 
 
-def detect_fork(board: Board, moves: list[Move]) -> bool:
+def detect_fork(
+        config: Config,
+        board: Board,
+        moves: list[Move]
+) -> bool:
+
     board1 = board.copy()
     board1.push(moves[0])
     moved_square = moves[0].to_square
@@ -317,13 +328,13 @@ def detect_fork(board: Board, moves: list[Move]) -> bool:
     if moved_piece is None:
         return False
     mover_color = moved_piece.color
-    moved_value = PIECE_VALUES[moved_piece.piece_type]
+    moved_value = config.PIECE_VALUES[moved_piece.piece_type]
 
-    if not can_withstand_capture(board1, moved_square, mover_color, moved_value):
+    if not can_withstand_capture(config, board1, moved_square, mover_color, moved_value):
         return False
 
     fork_targets = find_fork_targets(
-        board1, moved_square, mover_color, moved_value
+        config, board1, moved_square, mover_color, moved_value
     )
     if len(fork_targets) < 2:
         return False
@@ -332,7 +343,7 @@ def detect_fork(board: Board, moves: list[Move]) -> bool:
         board2 = board1.copy()
         board2.push(moves[1])
         capturer = board2.piece_at(moved_square)
-        if capturer and PIECE_VALUES[capturer.piece_type] > moved_value:
+        if capturer and config.PIECE_VALUES[capturer.piece_type] > moved_value:
             if board.is_capture(moves[2]) and moves[2].to_square == moved_square:
                 return True
             return False
@@ -351,6 +362,7 @@ def detect_promotion(moves: list[Move]) -> bool:
 
 
 def classify_puzzle(
+    config: Config,
     game: chess.pgn.Game
 ) -> str | None:
     fen = game.headers.get("FEN")
@@ -369,16 +381,17 @@ def classify_puzzle(
 
     if detect_promotion(moves):
         return "promotion"
-    if detect_fork(board.copy(), moves):
+    if detect_fork(config, board.copy(), moves):
         return "fork"
-    if detect_alignment(board.copy(), moves):
+    if detect_alignment(config, board.copy(), moves):
         return "alignment"
 
     return None
 
 
 def main():
-    logger = get_logger(__name__, CLASSIFY_PUZZLES_LOG_PATH)
+    config = Config()
+    logger = get_logger(__name__, config.CLASSIFY_PUZZLES_LOG_PATH)
 
     unlabeled_count = 0
     alignment_count = 0
@@ -387,21 +400,21 @@ def main():
 
     puzzle_ids = sorted([
         int(puzzle_id[:-4])
-        for puzzle_id in os.listdir(PUZZLES_DIRECTORY)
+        for puzzle_id in os.listdir(config.PUZZLES_DIRECTORY)
         if puzzle_id.endswith('.pgn') and puzzle_id[:-4].isdigit()
     ], reverse=True)
 
     for puzzle_id in puzzle_ids:
         try:
-            puzzle_path = os.path.join(PUZZLES_DIRECTORY, f'{puzzle_id}.pgn')
-            game = get_game(puzzle_path, logger)
+            puzzle_path = os.path.join(config.PUZZLES_DIRECTORY, f'{puzzle_id}.pgn')
+            game = get_game(config, puzzle_path, logger)
 
             if game is None:
                 continue
             if 'Label' in game.headers:
                 del game.headers['Label']
 
-            label = classify_puzzle(game)
+            label = classify_puzzle(config, game)
             if label is None:
                 unlabeled_count += 1
                 continue
@@ -416,7 +429,7 @@ def main():
             logger.info(f'Classified puzzle {puzzle_id} as {label}')
             game.headers['Label'] = label
 
-            write_game_to_file(game, puzzle_path, logger)
+            write_game_to_file(config, game, puzzle_path, logger)
 
         except ValueError as e:
             logger.error(f'Value error in puzzle {puzzle_id}: {e}')
