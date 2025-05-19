@@ -8,13 +8,17 @@ __pycache__/
 
 .DS_Store
 
-data/
+data/*
 
-logs/
+logs/*
 
-plots/
+plots/*
 
-engines/
+engines/*
+
+models/*
+
+tex/figures/*
 
 # Distribution / packaging
 .Python

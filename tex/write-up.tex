@@ -1,0 +1,316 @@
+\documentclass{article}
+\usepackage{nips15submit_e,times}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{url}
+\usepackage{float}
+
+\usepackage{xcolor}
+\definecolor{mybg}{HTML}{FAFAFA}
+\definecolor{mytext}{HTML}{060606}
+\pagecolor{mybg}
+\AtBeginDocument{\color{mytext}}
+
+
+\title{Chess Puzzle Classification}
+
+
+\author{
+Eric Anderson\\
+May 19, 2025\\
+}
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+\nipsfinalcopy
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Chess puzzles are positions that have exactly one winning sequence of moves for the side to play. They are popular online to challenge chess players and help them improve their abilities to recognize common tactical motifs in real games.
+
+Online chess platform Chess.com offers unlimited chess puzzles as the primary selling point behind their paid premium subscriptions. Founder and CEO of Chess.com Erik Allebest revealed on a 2024 podcast that the company creates over \$100 million in revenue every year through these premium subscriptions [1].
+
+Classifying chess puzzles by tactical motif enhances player improvement by enabling targeted training on specific weaknesses. Currently, many chess platforms prompt users to tag the puzzle after completion, which is inefficient and prone to human error. Automating puzzle classification with neural networks offers a faster and more reliable solution.
+
+
+\section{Data Collection}
+
+\subsection{Simulating Games}
+
+To collect the data for this project, I used the open source Stockfish chess engine to simulate over 200 thousand complete chess games. These games will be used to extract positions to be the starting positions for puzzles.
+
+Chess puzzles require definitive advantage for the side to move, so to obtain unbalanced positions it required inaccurate play from the chess engine. To accomplish this, I simulated these games on low depth, including a 15\% chance for the engine to play a random move on any given turn. Because of the inaccurate play, it is not guaranteed that the solutions to the chess puzzles were played out in the complete game. The games are used as a large collection of individual positions to be analyzed rather than a source of the solutions.
+
+I saved the full games to Portable Game Notation format to be processed further.
+
+\subsection{Extracting Puzzles}
+
+To be a puzzle, a position needs to meet these criteria:
+
+\begin{enumerate}
+      \item The side to move has a significant advantage
+      \item This advantage has not yet been realized; the material count on the board is even
+      \item The puzzle solution is a forcing move sequence; if any move other than the top engine move is played, the side to move will not retain this winning evaluation
+      \item At the end of the sequence, the side to move will be obviously winning
+\end{enumerate}
+
+To find puzzles that meet these criteria, I analyzed the positions from the games with the engine at a greater depth. Positions where the evaluation exceeded a threshold were considered candidates for puzzles. To ensure the advantage was not already realized, I filtered out positions where either side had a material advantage, as determined by counting the value of pieces on the board.
+
+Next, for each candidate position, I inverted the board if it is black's turn so that white is always the side to move at the beginning of the puzzle. This simplifies puzzle extraction and improves model performance, as the model only needs to be trained from the perspective of white. From there, I generated the top two engine moves and compared their evaluations. If the best move was significantly better than the second-best move, I then checked whether the best move sequence resulted in a material gain, indicating an obvious winning position. Only positions where the advantage could be converted by a single forcing sequence of moves were considered to be puzzles. For this project, I only considered two-move sequences to make tensor representation consistent. However this method works for puzzles of any length.
+
+I saved these puzzles in Portable Game Notation.
+
+\section{Labeling Puzzles}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/puzzle_categories.png}
+      \caption{Distribution of puzzle types in the labeled dataset.}
+      \label{fig:puzzle_categories}
+\end{figure}
+
+
+To understand why the majority of the puzzles generated remained unlabeled--as shown in Figure~\ref{fig:puzzle_categories}--it is helpful to understand how chess engines evaluate positions. Chess is too complex of a game to evaluate a position with just a stationary image of the board. There are too many subtle relationships between the pieces, and the consequences of a move can be hidden many turns into the future. Because of this, engines do not simply assign a value to a position based on the current arrangement of pieces. Instead, they evaluate positions by searching many moves ahead, considering the possible responses and counter-responses, and only then estimating which side stands better.
+
+This reliance on deep calculation means that even the best algorithms cannot fully capture the underlying tactical or strategic themes present in a position without extensive search. By this same principle, it is not possible to accurately assign a label to every puzzle using an algorithmic approach. Many positions are ambiguous or contain overlapping motifs that only become clear after several moves are played out.
+
+To avoid this, only the puzzles where the tactical motif is unambiguous and can be identified with high confidence are labeled. This ensures that the labeled data is accurate and reliable, even if it means that a large portion of the generated puzzles remain unlabeled. This trade-off is necessary to maintain the quality of the dataset.
+
+\subsection{Puzzle Labeling Algorithm}
+
+To assign labels to a subset of these puzzles, a deterministic algorithmic approach was implemented, focusing on common tactical motifs that can be identified with high confidence based on the the puzzle's solution. The algorithm analyzes the three moves of each puzzle (the player's move, the opponent's reply, and the player's subsequent move) and attempts to classify it into one of three categories:
+
+\begin{itemize}
+      \item \textbf{Promotion:} If the player promotes a piece in the puzzle solution, the puzzle is labeled 'promotion'. This is an unambiguous tactical event.
+
+      \item \textbf{Fork:} A puzzle is labeled as a 'fork' if the player's first move results in a single piece attacking at least two of the opponent's pieces. Conditions for this label include:
+            \begin{enumerate}
+                  \item The piece cannot immediately be captured by an opposing piece of equal or lesser value. If it can, this likely indicates the presense of an additional tactical motif that prevents this capture from happening
+                  \item The fork materializes by either resulting in a capture of one of the forked pieces, or the opponent captures the forking piece with a more valuable unit, which is then immediately recaptured by the player
+            \end{enumerate}
+
+      \item \textbf{Alignment Tactics:} A puzzle is considered an 'alignment' puzzle if it includes a pin, skewer, or discovered attack:
+            \begin{itemize}
+                  \item A pin is identified if a piece is immobilized because moving it would expose a more valuable piece to an attack along a rank, file, or diagonal
+                  \item A skewer is identified if an attacking piece targets an opponent's piece, behind which lies an additional piece of the opponent
+                  \item A discovered attack is identified when the player's first move reveals an attack from another of the player's pieces
+            \end{itemize}
+            Additionally, the solution's subsequent move must directly capitalize on this alignment.
+\end{itemize}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/piece_involvement.png}
+      \caption{Relative involvement of each piece type in the first move of puzzles, broken down by label. Sliding piece (bishop, rook, queen) moves are prevalent in alignment puzzles, knights make up a significant portion of fork puzzles, and pawns dominate promotion puzzles. Puzzles without a label have a more even split, with rook moves being slightly more represented.}
+      \label{fig:piece_involvement}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/piece_count_by_type.png}
+      \caption{Distribution of the number of pieces on the board at the beginning of the puzzle, broken down by label. Promotion puzzles have significantly fewer pieces on the board, as promotions tend to happen in endgames.}
+      \label{fig:piece_count_by_type}
+\end{figure}
+
+\section{Puzzle Features}
+
+To prepare chess puzzles for a neural network, individual board positions  are converted into numerical tensors depending on the board representation, then the sequence of positions are concatenated depending on the puzzle representation. Feature scaling is not necessary as the inputs are categorical rather than quantitative.
+
+\subsection{Board Representation}
+
+A single chess position is represented as a tensor, with three main approaches:
+
+\begin{itemize}
+      \item \textbf{Piece Index:} Each square is assigned a signed integer for the piece type and color
+      \item \textbf{Signed One-Hot:} Six channels--one per piece type--with \(+1\) for white, \(-1\) for black
+      \item \textbf{One-Hot:} Twelve channels (one per piece-color combination), with \(1\) for presence
+\end{itemize}
+
+\subsection{Puzzle Representation}
+
+A sequence of board tensors are concatenated into a single tensor:
+
+\begin{itemize}
+      \item \textbf{First Only:} Uses only the initial board tensor
+      \item \textbf{First and Last:} Concatenates tensors of the initial and final board states
+      \item \textbf{All Positions:} Concatenates all four board positions in the solution sequence
+\end{itemize}
+
+\section{Primary Model: Convolutional Neural Network}
+
+The primary model I used was a convolutional neural network. Convolutional neural networks are widely used across chess machine learning problems because of their ability to capture relationships between pieces on the board.
+
+\subsection{Hyperparameter Tuning}
+
+To tune this model, I used a random search to find optimal configurations. Next, I trained the model focusing on individual hyperparameters to understand and visualize the effect they have on the performance of the model.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/cnn_BOARD_REPRESENTATION_tuning.png}
+      \caption{Comparison between the three board representations with the CNN model. The piece index representation led to the model underfitting. The other two representations had about the same performance.}
+      \label{fig:cnn_board_representation}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/cnn_PUZZLE_REPRESENTATION_tuning.png}
+      \caption{Comparison between the three position representations with the CNN model. Inputting all positions in the sequence resulted in significantly better performance. However, for scenarios where either only the first position is known or the puzzles vary in length, the other two representations can be useful.}
+      \label{fig:cnn_puzzle_representation}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/cnn_ACTIVATION_FUNCTION_tuning.png}
+      \caption{Comparison between different activation functions with the CNN model. LeakyReLU and ReLU had the best performance, indicating that for this problem it is best to introduce non-linearity with a simple activation function.}
+      \label{fig:cnn_activation_function}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/cnn_DROPOUT_tuning.png}
+      \caption{Loss curve for different neuron dropout rates with the CNN model. Adding a significant dropout to my model effectively reduces overfitting.}
+      \label{fig:cnn_dropout}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/cnn_NUM_SAMPLES_tuning.png}
+      \caption{Learning curve for training set size with the CNN model. There seems to be some more room for improvement with more training data.}
+      \label{fig:cnn_num_samples}
+\end{figure}
+
+
+\subsection{Results}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/cnn_metrics.png}
+      \caption{The accuracy (0.956), precision (0.955), recall (0.961), and F1 score (0.958) achieved by the CNN model.}
+      \label{fig:cnn_metrics}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/incorrect.png}
+      \caption{An example of a puzzle that was incorrectly classified by the CNN model. The correct sequence of moves is:\\
+            1. f7+ Nxf7\\
+            2. Bxd8\\
+            This puzzle is an alignment puzzle (discovered attack), however it was incorrectly classified as a promotion puzzle. The model most likely recognized the pawn push on the opponent's side of the board, which are associated with promotion sequences. This type of error may be improved with more training data.}
+      \label{fig:incorrect}
+\end{figure}
+
+\section{Alternative Model: Multi-Layer Perceptron}
+
+As an alternative model, I attempted to solve the same problem using a standard feed-forward neural network.
+
+\subsection{Hyperparameter Tuning}
+
+I employed the same method of random search for hyperparameter tuning and full sweep for visualization and analysis that I used for the primary model.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/mlp_BOARD_REPRESENTATION_tuning.png}
+      \caption{Comparison between the three board representations with the MLP model. Unlike the CNN, this model performed best with the sparsest representation.}
+      \label{fig:mlp_board_representation}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/mlp_PUZZLE_REPRESENTATION_tuning.png}
+      \caption{Comparison between the three position representations with the MLP model. Unlike the CNN, this model performed better with only the first and last positions of the puzzle.}
+      \label{fig:mlp_puzzle_representation}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/mlp_ACTIVATION_FUNCTION_tuning.png}
+      \caption{Comparison between different activation functions with the MLP model. The Sigmoid function performed slightly better than the other functions.}
+      \label{fig:mlp_activation_function}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/mlp_DROPOUT_tuning.png}
+      \caption{Loss curve for different neuron dropout rates with the MLP model. Adding a moderate dropout to this model slightly reduces overfitting.}
+      \label{fig:mlp_dropout}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/mlp_NUM_SAMPLES_tuning.png}
+      \caption{Learning curve for training set size with the MLP model. This model would perform significantly better with more training data.}
+      \label{fig:mlp_num_samples}
+\end{figure}
+
+
+\subsection{Results}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/mlp_metrics.png}
+      \caption{The accuracy (0.842), precision (0.843), recall (0.836), and F1 score (0.839) achieved by the MLP model.}
+      \label{fig:mlp_metrics}
+\end{figure}
+
+\section{Alternative Model: Logistic Regression}
+
+As an alternative model, I attempted to solve the same problem using the logistic regression algorithm.
+
+\subsection{Hyperparameter Tuning}
+
+I employed the same method of random search for hyperparameter tuning and full sweep for visualization and analysis that I used for the previous models.
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/lr_BOARD_REPRESENTATION_tuning.png}
+      \caption{Comparison between the three board representations with the LR model. Like the MLP, this model performed best with the sparsest representation.}
+      \label{fig:lr_board_representation}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/lr_PUZZLE_REPRESENTATION_tuning.png}
+      \caption{Comparison between the three position representations with the LR model. This model performed about the same with both the first and last positions and all four positions as input.}
+      \label{fig:lr_puzzle_representation}
+\end{figure}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/lr_NUM_SAMPLES_tuning.png}
+      \caption{Learning curve for training set size with the LR model. Similarly to the MLP model, this model would perform significantly better with more training data.}
+      \label{fig:lr_num_samples}
+\end{figure}
+
+
+\subsection{Results}
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.65\linewidth]{figures/lr_metrics.png}
+      \caption{The accuracy (0.816), precision (0.824), recall (0.812), and F1 score (0.816) achieved by the LR model.}
+      \label{fig:lr_metrics}
+\end{figure}
+
+\section{Conclusion}
+
+In this project, I explored automatic classification of chess puzzles into promotion, fork and alignment tactical motifs by comparing three models: a convolutional neural network (CNN), a multi-layer perceptron (MLP) and logistic regression (LR). The CNN with a one-hot board representation and all four positions in the solution sequence achieved the best performance, with accuracy \(0.956\), precision \(0.955\), recall \(0.961\) and F1 score \(0.958\). The MLP and LR models struggled with overfitting but produced still respectable accuracies of \(0.842\) and \(0.816\), respectively. The superior results of the CNN highlight its ability to capture spatial relationships between pieces, making it the preferred choice for chess machine learning problems.
+
+
+\section{References}
+
+\small{
+[1] Harry, S. (n.d.) \textit{Erik Allebest: Scaling to \$100M Revenue, 150M Members and 700 People, All with No VC Funding | E1113.}
+Accessed: May 18, 2025. [Online]. Available:
+https://www.youtube.com/watch?v=sT3isR06-fg
+
+[2] Chess.com (2021) \textit {Chess Tactics | 38 Definitions and Examples.}
+May 2021. Accessed: May 18, 2025. [Online]. Available:
+https://www.chess.com/article/view/chess-tactics
+}
+
+\end{document}

@@ -1,3 +1,4 @@
+import datetime
 import torch.nn.functional as F
 import numpy as np
 from logging import Logger
@@ -5,9 +6,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split, Subset
+from src.model.puzzle_logistic_regression import PuzzleLogisticRegression
+from src.model.puzzle_mlp import PuzzleMLP
 from src.model.puzzle_cnn import PuzzleCNN
 from src.model.puzzle_dataset import LabeledPuzzleDataset, UnlabeledPuzzleDataset, get_datasets
-from src.util.config import Config, LearningType
+from src.util.config import Config, LearningType, ModelType
 from src.util.logger import get_logger
 from src.util.plotting import line_plot
 
@@ -212,6 +215,7 @@ def gradient_descent(
     validation_loader: DataLoader,
     test_loader: DataLoader,
     optimizer: optim.Optimizer,
+    scheduler: optim.lr_scheduler.LRScheduler | None,
     loss_fn: nn.Module,
     logger: Logger,
 ) -> tuple[float, float]:
@@ -268,9 +272,12 @@ def gradient_descent(
         val_accuracies.append(validation_accuracy)
         train_accuracies.append(train_accuracy)
 
+        if train_labeled_loss < best_train_loss - config.EARLY_STOPPING_DELTA:
+            best_train_loss = train_labeled_loss
+            no_improve = no_improve // 1.5
+
         if validation_loss < best_validation_loss - config.EARLY_STOPPING_DELTA:
             best_validation_loss = validation_loss
-            best_train_loss = train_labeled_loss
             best_validation_accuracy = validation_accuracy
             best_epoch = epoch
             no_improve = 0
@@ -292,22 +299,27 @@ def gradient_descent(
             )
         logger.info(log_msg)
 
+        if scheduler is not None:
+            scheduler.step(validation_loss)
+
     logger.info(
         f"Best Epoch: {best_epoch}\n"
         f"\tValidation Loss: {(best_validation_loss):.4f}%"
         f"\tValidation Accuracy: {(best_validation_accuracy*100):.2f}%"
     )
 
-    line_plot(
-        x=np.array(epochs),
-        y=[np.array(train_accuracies), np.array(val_accuracies)],
-        logger=logger,
-        title="Model Accuracy Over Training",
-        xlabel="Epoch",
-        ylabel="Accuracy",
-        labels=["Training Accuracy", "Validation Accuracy"],
-        filename="accuracy_plot.png"
-    )
+    # now = datetime.datetime.now()
+    # formatted_date_time = now.strftime("%m-%d-%H-%M-%S")
+    # line_plot(
+    #     x=np.array(epochs),
+    #     y=[np.array(train_accuracies), np.array(val_accuracies)],
+    #     logger=logger,
+    #     title=f"Accuracy",
+    #     xlabel="Epoch",
+    #     ylabel="Accuracy",
+    #     labels=["Training Accuracy", "Validation Accuracy"],
+    #     filename=f"accuracy_{formatted_date_time}.png"
+    # )
 
     if test_loader and len(test_loader.dataset) > 0:
         test_loss, test_accuracy = validate(config, model, test_loader, loss_fn, logger)
@@ -328,8 +340,17 @@ def main():
     labeled_train_loader, unlabeled_train_loader, validation_loader, test_loader = get_dataloaders(
         config, labeled_dataset, unlabeled_dataset, logger)
 
-    model = PuzzleCNN(config).to(config.DEVICE)
+    if config.MODEL_TYPE == ModelType.CNN:
+        model = PuzzleCNN(config).to(config.DEVICE)
+    elif config.MODEL_TYPE == ModelType.MLP:
+        model = PuzzleMLP(config).to(config.DEVICE)
+    elif config.MODEL_TYPE == ModelType.LOGISTIC_REGRESSION:
+        model = PuzzleLogisticRegression(config).to(config.DEVICE)
+    else:
+        raise ValueError("Unrecognized neural network type")
+
     optimizer = config.OPTIMIZATION_FUNCTION(model.parameters(), lr=config.LEARNING_RATE)
+    scheduler = config.SCHEDULER(optimizer) if config.SCHEDULER is not None else None
     loss_fn = config.LOSS_FUNCTION()
 
     gradient_descent(
@@ -340,6 +361,7 @@ def main():
         validation_loader,
         test_loader,
         optimizer,
+        scheduler,
         loss_fn,
         logger,
     )

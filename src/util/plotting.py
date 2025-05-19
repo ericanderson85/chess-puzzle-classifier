@@ -9,7 +9,7 @@ from logging import Logger
 
 BLACK = '#1F1F1F'
 GRAY = '#676F79'
-WHITE = '#D4D4D4'
+WHITE = '#F2F2F2'
 
 LIGHT_BLUE = '#9ADAFB'
 DARK_BLUE = '#569CD6'
@@ -19,9 +19,9 @@ GREEN = '#4DC9B0'
 YELLOW = '#D2D2A2'
 
 
-PLOT_BACKGROUND_COLOR = BLACK
-TEXT_COLOR = WHITE
-AXIS_COLOR = WHITE
+PLOT_BACKGROUND_COLOR = WHITE
+TEXT_COLOR = BLACK
+AXIS_COLOR = BLACK
 COLOR_CYCLE = [LIGHT_BLUE, GREEN, ORANGE, PURPLE, YELLOW]
 CUSTOM_FONT_PATH: str | None = '/Users/eric/Library/Fonts/Inter.ttc'
 DEFAULT_FONT_SIZE = 12
@@ -40,7 +40,7 @@ FILL_ALPHA = 0.4
 BOX_WIDTH = 0.6
 BOX_NOTCH = False
 BOX_FLIER_MARKER = 'o'
-BOX_FLIER_MARKER_FACE_COLOR = WHITE
+BOX_FLIER_MARKER_FACE_COLOR = BLACK
 BOX_FLIER_MARKER_EDGE_COLOR = GRAY
 BOX_FLIER_ALPHA = 0.45
 HIST_BINS: int | list[float] | str = 'auto'
@@ -279,32 +279,34 @@ def bar_chart(
 
     fig, ax = plt.subplots(figsize=DEFAULT_FIGURE_SIZE)
 
-    if type(x) is list:
-        x = [len(l) for l in x]
-    elif type(x) is str:
+    if isinstance(x, str):
         x = [l.replace("_", " ").title() for l in x]
 
     is_single_series = isinstance(y, np.ndarray) and y.ndim == 1
-
     y_data = [y] if is_single_series else y
     num_series = len(y_data)
     num_categories = len(x)
     x_indices = np.arange(num_categories)
 
     if is_single_series:
+        colors = [
+            COLOR_CYCLE[i % len(COLOR_CYCLE)]
+            for i in range(num_categories)
+        ]
         label = labels[0] if labels and len(labels) > 0 else None
 
-        sns.barplot(
-            x=x,
-            y=y_data[0],
+        ax.bar(
+            x_indices,
+            y_data[0],
             width=BAR_WIDTH,
             alpha=BAR_ALPHA,
-            color=COLOR_CYCLE[0],
+            color=colors,
             label=label,
-            ax=ax,
             edgecolor=AXIS_COLOR,
             linewidth=0.8,
         )
+        ax.set_xticks(x_indices)
+        ax.set_xticklabels(x)
     else:
         group_width = BAR_WIDTH / num_series
         offsets = np.linspace(

@@ -1,3 +1,4 @@
+import numpy as np
 from src.util.config import Config
 from chess import Board, Move
 import os
@@ -6,6 +7,7 @@ import chess
 from chess import pgn, Board, Move, WHITE, BLACK, Square
 from src.util.chess_util import get_game, write_game_to_file
 from src.util.logger import get_logger
+from src.util.plotting import bar_chart, box_plot, histogram
 
 import chess
 
@@ -398,6 +400,18 @@ def main():
     fork_count = 0
     promotion_count = 0
 
+    puzzle_data = {
+        'id': [],
+        'label': [],
+        'total_pieces': [],
+        'material_difference': [],
+        'legal_moves_count': [],
+        'attacker_pieces': [],
+        'defender_pieces': [],
+        'piece_types_involved': [],
+        'puzzle_length': []
+    }
+
     puzzle_ids = sorted([
         int(puzzle_id[:-4])
         for puzzle_id in os.listdir(config.PUZZLES_DIRECTORY)
@@ -417,19 +431,61 @@ def main():
             label = classify_puzzle(config, game)
             if label is None:
                 unlabeled_count += 1
-                continue
-
-            if label == 'alignment':
+                label = "unlabeled"
+            elif label == 'alignment':
                 alignment_count += 1
-            if label == 'fork':
+            elif label == 'fork':
                 fork_count += 1
-            if label == 'promotion':
+            elif label == 'promotion':
                 promotion_count += 1
 
-            logger.info(f'Classified puzzle {puzzle_id} as {label}')
-            game.headers['Label'] = label
+            board = chess.Board(game.headers.get("FEN"))
 
-            write_game_to_file(config, game, puzzle_path, logger)
+            piece_count = sum(1 for _ in board.piece_map().values())
+
+            material = {chess.WHITE: 0, chess.BLACK: 0}
+            for square, piece in board.piece_map().items():
+                material[piece.color] += config.PIECE_VALUES[piece.piece_type]
+            material_diff = material[chess.WHITE] - material[chess.BLACK]
+            if board.turn == chess.BLACK:
+                material_diff = -material_diff
+
+            legal_moves = len(list(board.legal_moves))
+
+            attacker_pieces = [p.piece_type for s, p in board.piece_map().items()
+                               if p.color == board.turn]
+            defender_pieces = [p.piece_type for s, p in board.piece_map().items()
+                               if p.color != board.turn]
+
+            involved_pieces = set()
+            temp_board = board.copy()
+            node = game
+            puzzle_length = 0
+            for _ in range(3):
+                if not node.variations:
+                    break
+                node = node.variations[0]
+                move = node.move
+                puzzle_length += 1
+                from_piece = temp_board.piece_at(move.from_square)
+                if from_piece:
+                    involved_pieces.add(from_piece.piece_type)
+                temp_board.push(move)
+
+            puzzle_data['id'].append(puzzle_id)
+            puzzle_data['label'].append(label)
+            puzzle_data['total_pieces'].append(piece_count)
+            puzzle_data['material_difference'].append(material_diff)
+            puzzle_data['legal_moves_count'].append(legal_moves)
+            puzzle_data['attacker_pieces'].append(attacker_pieces)
+            puzzle_data['defender_pieces'].append(defender_pieces)
+            puzzle_data['piece_types_involved'].append(list(involved_pieces))
+            puzzle_data['puzzle_length'].append(puzzle_length)
+
+            if label != "unlabeled":
+                logger.info(f'Classified puzzle {puzzle_id} as {label}')
+                game.headers['Label'] = label
+                write_game_to_file(config, game, puzzle_path, logger)
 
         except ValueError as e:
             logger.error(f'Value error in puzzle {puzzle_id}: {e}')
@@ -443,6 +499,194 @@ def main():
         '\n'
         f'Unlabeled puzzles: {unlabeled_count}\n'
     )
+
+    visualize_puzzle_data(config, puzzle_data, logger)
+
+
+def visualize_puzzle_data(config: Config, puzzle_data, logger):
+    labels = np.array(puzzle_data['label'])
+    total_pieces = np.array(puzzle_data['total_pieces'])
+    material_difference = np.array(puzzle_data['material_difference'])
+    legal_moves_count = np.array(puzzle_data['legal_moves_count'])
+
+    label_counts = {
+        'alignment': np.sum(labels == 'alignment'),
+        'fork': np.sum(labels == 'fork'),
+        'promotion': np.sum(labels == 'promotion'),
+        'unlabeled': np.sum(labels == 'unlabeled')
+    }
+    bar_chart(
+        x=list(label_counts.keys()),
+        y=np.array(list(label_counts.values())),
+        logger=logger,
+        title="Distribution of Puzzle Categories",
+        xlabel="Puzzle Type",
+        ylabel="Count",
+        filename="puzzle_categories.png"
+    )
+
+    alignment_pieces = total_pieces[labels == 'alignment']
+    fork_pieces = total_pieces[labels == 'fork']
+    promotion_pieces = total_pieces[labels == 'promotion']
+    unlabeled_pieces = total_pieces[labels == 'unlabeled']
+
+    box_plot(
+        data=[alignment_pieces, fork_pieces, promotion_pieces, unlabeled_pieces],
+        logger=logger,
+        title="Piece Count Distribution by Puzzle Type",
+        xlabel="Puzzle Type",
+        ylabel="Number of Pieces",
+        labels=["Alignment", "Fork", "Promotion", "Unlabeled"],
+        filename="piece_count_by_type.png"
+    )
+
+    histogram(
+        data=material_difference,
+        logger=logger,
+        title="Material Difference Distribution",
+        xlabel="Material Difference (+ = First Player Advantage)",
+        ylabel="Frequency",
+        filename="material_difference.png"
+    )
+
+    alignment_material = material_difference[labels == 'alignment']
+    fork_material = material_difference[labels == 'fork']
+    promotion_material = material_difference[labels == 'promotion']
+    unlabeled_material = material_difference[labels == 'unlabeled']
+
+    box_plot(
+        data=[alignment_material, fork_material, promotion_material, unlabeled_material],
+        logger=logger,
+        title="Material Difference by Puzzle Type",
+        xlabel="Puzzle Type",
+        ylabel="Material Difference",
+        labels=["Alignment", "Fork", "Promotion", "Unlabeled"],
+        filename="material_diff_by_type.png"
+    )
+
+    histogram(
+        data=legal_moves_count,
+        logger=logger,
+        title="Distribution of Legal Moves",
+        xlabel="Number of Legal Moves",
+        ylabel="Frequency",
+        filename="legal_moves_hist.png"
+    )
+
+    alignment_moves = legal_moves_count[labels == 'alignment']
+    fork_moves = legal_moves_count[labels == 'fork']
+    promotion_moves = legal_moves_count[labels == 'promotion']
+    unlabeled_moves = legal_moves_count[labels == 'unlabeled']
+
+    box_plot(
+        data=[alignment_moves, fork_moves, promotion_moves, unlabeled_moves],
+        logger=logger,
+        title="Legal Moves by Puzzle Type",
+        xlabel="Puzzle Type",
+        ylabel="Number of Legal Moves",
+        labels=["Alignment", "Fork", "Promotion", "Unlabeled"],
+        filename="legal_moves_by_type.png"
+    )
+
+    piece_involvement = {
+        'pawn': [0, 0, 0, 0],
+        'knight': [0, 0, 0, 0],
+        'bishop': [0, 0, 0, 0],
+        'rook': [0, 0, 0, 0],
+        'queen': [0, 0, 0, 0],
+        'king': [0, 0, 0, 0]
+    }
+
+    piece_type_names = {
+        chess.PAWN: 'pawn',
+        chess.KNIGHT: 'knight',
+        chess.BISHOP: 'bishop',
+        chess.ROOK: 'rook',
+        chess.QUEEN: 'queen',
+        chess.KING: 'king'
+    }
+
+    label_indices = {
+        'alignment': 0,
+        'fork': 1,
+        'promotion': 2,
+        'unlabeled': 3
+    }
+
+    for puzzle_idx in range(len(puzzle_data['id'])):
+        try:
+
+            puzzle_id = puzzle_data['id'][puzzle_idx]
+            puzzle_path = os.path.join(config.PUZZLES_DIRECTORY, f'{puzzle_id}.pgn')
+            game = get_game(config, puzzle_path, logger)
+
+            if game is None:
+                continue
+
+            board = chess.Board(game.headers.get("FEN"))
+            label = puzzle_data['label'][puzzle_idx]
+            label_idx = label_indices[label]
+
+            node = game
+            move_idx = 0
+
+            while node.variations and move_idx < 3:
+                node = node.variations[0]
+                move = node.move
+
+                if move_idx == 0 or move_idx == 2:
+                    piece = board.piece_at(move.from_square)
+                    if piece and piece.piece_type in piece_type_names:
+                        piece_name = piece_type_names[piece.piece_type]
+                        piece_involvement[piece_name][label_idx] += 1
+
+                board.push(move)
+                move_idx += 1
+
+        except Exception as e:
+            logger.error(f"Error analyzing pieces for puzzle {puzzle_id}: {e}")
+
+    category_counts = [
+        np.sum(labels == 'alignment'),
+        np.sum(labels == 'fork'),
+        np.sum(labels == 'promotion'),
+        np.sum(labels == 'unlabeled')
+    ]
+
+    for piece, counts in piece_involvement.items():
+        for i, count in enumerate(counts):
+            if category_counts[i] > 0:
+                piece_involvement[piece][i] = (count / category_counts[i]) * 100
+
+    category_labels = ["Alignment", "Fork", "Promotion", "Unlabeled"]
+    piece_types = list(piece_involvement.keys())
+
+    y_data = []
+    for piece in piece_types:
+        y_data.append(np.array([piece_involvement[piece][i] for i in range(4)]))
+
+    bar_chart(
+        x=np.array(category_labels),
+        y=y_data,
+        logger=logger,
+        title="Piece Involvement by Puzzle Type",
+        xlabel="Puzzle Type",
+        ylabel="Percentage of Puzzles",
+        labels=piece_types,
+        filename="piece_involvement.png"
+    )
+
+    puzzle_length_arr = np.array(puzzle_data['puzzle_length'])
+    histogram(
+        data=puzzle_length_arr,
+        logger=logger,
+        title="Puzzle Length Distribution",
+        xlabel="Number of Moves",
+        ylabel="Frequency",
+        filename="puzzle_length_hist.png"
+    )
+
+    print("Visualization complete. Plots saved to the 'plots' directory.")
 
 
 if __name__ == '__main__':

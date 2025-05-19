@@ -1,11 +1,16 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
-import random
 from chess import PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
 from torch import nn, optim
 import os
 
 import torch
+
+
+class ModelType(Enum):
+    CNN = auto()
+    MLP = auto()
+    LOGISTIC_REGRESSION = auto()
 
 
 class LearningType(Enum):
@@ -22,7 +27,7 @@ class BoardRepresentation(Enum):
 class PuzzleRepresentation(Enum):
     FIRST = 1
     FIRST_AND_LAST = 2
-    FEW = 4
+    ALL = 4
 
 
 @dataclass
@@ -30,7 +35,9 @@ class Config:
     # Directories and files paths
     ENGINES_DIRECTORY: str = "engines/"
     DATA_DIRECTORY: str = "data/"
+    MODELS_DIRECTORY: str = "models/"
     LOGS_DIRECTORY: str = "logs/"
+    PLOTS_DIRECTORY: str = "plots/"
     GAMES_DIRECTORY: str = field(default="data/games", init=False)
     PUZZLES_DIRECTORY: str = field(default="data/puzzles", init=False)
     OPENING_BOOK_PATH: str = field(default="data/codekiddy.bin", init=False)
@@ -57,6 +64,8 @@ class Config:
     # Puzzle classification parameters
     CLASSIFY_PUZZLES_LOG_PATH: str = os.path.join(LOGS_DIRECTORY, "classify_puzzles.log")
 
+    EVALUATE_LOG_PATH = os.path.join(LOGS_DIRECTORY, "evaluate.log")
+
     # Piece values for material evaluation
     PAWN_VALUE: int = 100
     KNIGHT_VALUE: int = 300
@@ -75,6 +84,8 @@ class Config:
     CPU_COUNT: int = field(default_factory=os.cpu_count)
 
     # Model parameters
+    MODEL_TYPE: ModelType = ModelType.MLP
+
     PUZZLE_CLASSES: list[str] = field(default_factory=lambda: [
         'alignment',  # pins, skewers, discovered
         'fork',       # one piece attacks two or more targets
@@ -82,7 +93,7 @@ class Config:
     ])
 
     DATA_SPLIT: dict[str, float] = field(default_factory=lambda: {
-        'train': 0.8, 'validate': 0.2, 'test': 0.0
+        'train': 0.7, 'validate': 0.2, 'test': 0.1
     })
     NUM_SAMPLES: int | None = None
     NUM_UNLABELED_SAMPLES: int | None = None
@@ -91,37 +102,33 @@ class Config:
     UNSUPERVISED_LOSS_WEIGHT: float = 0.35
     LABEL_CONFIDENCE_THRESHOLD: float = 0.95
 
-    BOARD_REPRESENTATION: BoardRepresentation = BoardRepresentation.PIECE_TYPES
-    PUZZLE_REPRESENTATION: PuzzleRepresentation = PuzzleRepresentation.FEW
+    BOARD_REPRESENTATION: BoardRepresentation = BoardRepresentation.PIECE_TYPES_AND_COLORS
+    PUZZLE_REPRESENTATION: PuzzleRepresentation = PuzzleRepresentation.ALL
 
-    FLATTENED_CHANNEL_DIMENSION: int = field(default=0, init=False)
-
-    CONVOLUTION_LAYERS: list[tuple[int, int, int, int, int]
-                             ] = field(default_factory=list, init=False)
-
-    FLATTENED_CONVOLUTION_OUTPUT_DIMENSION: int = field(default=0, init=False)
-
-    FULLY_CONNECTED_LAYERS: list[tuple[int, int]] = field(default_factory=list, init=False)
-
-    DROPOUT: float = 0.4
-    ACTIVATION_FUNCTION: nn.Module = nn.ReLU
+    CONVOLUTION_LAYERS: list[tuple[int, int, int, int]] = field(
+        default_factory=lambda: [(32, 3, 1, 1), (64, 3, 1, 1)])
+    FULLY_CONNECTED_LAYERS: list[int] = field(default_factory=lambda: [64, 64])
 
     # Training hyperparameters
     ACTIVE_LEARNING_LOG_PATH: str = os.path.join(LOGS_DIRECTORY, "active_learning.log")
     TUNE_LOG_PATH: str = os.path.join(LOGS_DIRECTORY, "tune.log")
     TRAIN_LOG_PATH: str = os.path.join(LOGS_DIRECTORY, "train.log")
-    RANDOM_SEED: int = 11
+    RANDOM_SEED: int = 7
     DEVICE: torch.device = field(
         default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
-    MAX_EPOCHS = 100
+
+    MAX_EPOCHS = 200
     EARLY_STOPPING_PATIENCE = 10
-    EARLY_STOPPING_DELTA = 1e-5
-    BATCH_SIZE: int = 16
-    LEARNING_RATE: float = 0.001
-    REGULARIZATION: float = 0
+    EARLY_STOPPING_DELTA = 1e-6
+    BATCH_SIZE: int = 48
+    LEARNING_RATE: float = 0.002
+    DROPOUT: float = 0.65
+    ACTIVATION_FUNCTION: nn.Module = nn.Sigmoid
+
     LOSS_FUNCTION: nn.Module = nn.CrossEntropyLoss
     OPTIMIZATION_FUNCTION: optim.Optimizer = optim.Adam
+    SCHEDULER: optim.lr_scheduler.LRScheduler | None = None
 
     def __post_init__(self):
         self.GAMES_DIRECTORY = os.path.join(self.DATA_DIRECTORY, 'games')
@@ -140,37 +147,6 @@ class Config:
             QUEEN: self.QUEEN_VALUE,
             KING: self.KING_VALUE
         }
-
-        random.seed(self.RANDOM_SEED)
-
-        self.update_model_parameters()
-
-    def update_model_parameters(self):
-        self.FLATTENED_CHANNEL_DIMENSION = (
-            self.BOARD_REPRESENTATION.value[0] * self.PUZZLE_REPRESENTATION.value
-        )
-
-        self.CONVOLUTION_LAYERS = [
-            (self.FLATTENED_CHANNEL_DIMENSION, 32, 3, 1, 1),
-            (32, 64, 3, 1, 1),
-            (64, 128, 3, 2, 1),
-        ]
-
-        height, width = self.BOARD_REPRESENTATION.value[1], self.BOARD_REPRESENTATION.value[2]
-        out_channels = self.FLATTENED_CHANNEL_DIMENSION
-
-        for in_c, out_c, kernel, stride, pad in self.CONVOLUTION_LAYERS:
-            height = self.conv2d_output_size(height, kernel, stride, pad)
-            width = self.conv2d_output_size(width, kernel, stride, pad)
-            out_channels = out_c
-
-        self.FLATTENED_CONVOLUTION_OUTPUT_DIMENSION = out_channels * height * width
-
-        self.FULLY_CONNECTED_LAYERS = [
-            (self.FLATTENED_CONVOLUTION_OUTPUT_DIMENSION, 256),
-            (256, 64),
-            (64, len(self.PUZZLE_CLASSES)),
-        ]
 
     @staticmethod
     def conv2d_output_size(size, kernel_size, stride, padding):
